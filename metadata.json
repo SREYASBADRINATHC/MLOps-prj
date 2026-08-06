@@ -1,0 +1,6 @@
+{
+  "name": "CartSense Hybrid MLOps Pipeline",
+  "description": "Interactive MLOps simulation dashboard demonstrating hybrid recommendation routing, cold-start handling, and concept drift retraining.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

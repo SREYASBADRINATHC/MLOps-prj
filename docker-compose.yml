@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: cartsense_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secret_password
+      POSTGRES_DB: feature_store
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d feature_store"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.2
+    container_name: mlflow_tracking_server
+    ports:
+      - "5000:5000"
+    environment:
+      - BACKEND_STORE_URI=postgresql://postgres:postgres_secret_password@db:5432/feature_store
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://postgres:postgres_secret_password@db:5432/feature_store
+      --default-artifact-root ./mlruns
+      --host 0.0.0.0
+      --port 5000
+    depends_on:
+      db:
+        condition: service_healthy
+
+  fastapi-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi_recommendation_server
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres_secret_password@db:5432/feature_store
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      db:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+
+volumes:
+  pgdata:
