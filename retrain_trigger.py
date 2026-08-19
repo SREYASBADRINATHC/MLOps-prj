@@ -1,7 +1,19 @@
+import logging
 import os
+import sys
 import time
 import numpy as np
 import pandas as pd
+
+# Fix UnicodeEncodeError for emoji characters on Windows terminals (cp1252)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+# Suppress noisy urllib3 retry warnings when MLflow server is offline
+logging.getLogger("urllib3").setLevel(logging.ERROR)
+
+# Suppress GitPython warning when git is not on PATH
+os.environ.setdefault("GIT_PYTHON_REFRESH", "quiet")
 
 # Import MLflow and Evidently components
 import mlflow
@@ -53,13 +65,15 @@ def run_retrain_and_log_to_mlflow(drift_score: float):
     print("\n🔄 [CT TRIGGERED] Initializing PySpark & Scikit-Learn CT Retraining Loop...")
     time.sleep(1)
     
-    # Setting active experiment in MLflow
+    # Setting active experiment in MLflow — fall back to local file tracking if server is offline
     try:
         mlflow.set_experiment("CartSense_Hybrid_Recommendation")
     except Exception as e:
-        print(f"⚠️ Could not establish connection to MLflow tracking server: {e}")
-        print("💻 Proceeding with local simulated logging mode.")
-    
+        print(f"⚠️ Could not connect to MLflow server at {MLFLOW_TRACKING_URI}: {e}")
+        print("💻 Falling back to local MLflow file tracking (./mlruns).")
+        mlflow.set_tracking_uri("./mlruns")
+        mlflow.set_experiment("CartSense_Hybrid_Recommendation")
+
     with mlflow.start_run() as run:
         # 1. Log Hyperparameters of Retrained Models
         mlflow.log_param("scikit_vectorizer", "TF-IDF")
@@ -112,10 +126,11 @@ def evaluate_drift_and_trigger_ct():
     # Evidently stores the share of drifted features under DatasetDriftMetric
     metric_results = report_dict["metrics"][0]["result"]
     
-    number_of_drifted_features = metric_results["number_of_drifted_features"]
-    total_features = metric_results["number_of_features"]
-    # Ratio of drifted features represents the Drift Score
-    drift_score = metric_results["share_of_drifted_features"]
+    # Evidently v0.4.x uses 'columns' keys (not 'features')
+    number_of_drifted_features = metric_results["number_of_drifted_columns"]
+    total_features = metric_results["number_of_columns"]
+    # Ratio of drifted columns represents the Drift Score
+    drift_score = metric_results["share_of_drifted_columns"]
     
     print("\n📋 ================= DRIFT REPORT SUMMARY ================= 📋")
     print(f"🔹 Total Features Evaluated: {total_features}")

@@ -1,0 +1,1 @@
+{'model_type': 'HybridRouter', 'model_version': 'v2.4.1_stable', 'tf_idf_vocab_size': 2048, 'spark_latent_factors_user': 10, 'spark_latent_factors_item': 10}

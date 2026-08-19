@@ -1,55 +1,87 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  db:
-    image: postgres:15-alpine
-    container_name: cartsense_db
+  postgres_db:
+    image: postgres:15
+    container_name: cartsense_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_secret_password
-      POSTGRES_DB: feature_store
+      POSTGRES_DB: cartsense
+      POSTGRES_USER: cartsense_user
+      POSTGRES_PASSWORD: cartsense_pass
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d feature_store"]
+      test: ["CMD-SHELL", "pg_isready -U cartsense_user -d cartsense"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 20
 
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.10.2
-    container_name: mlflow_tracking_server
+  mlflow_server:
+    image: python:3.11-slim
+    container_name: cartsense_mlflow
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - mlflow_data:/mlflow
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://cartsense_user:cartsense_pass@postgres_db:5432/cartsense
+      MLFLOW_ARTIFACT_ROOT: /mlflow/artifacts
+    command: >
+      sh -c "pip install --no-cache-dir mlflow psycopg2-binary &&
+             mlflow server
+             --host 0.0.0.0
+             --port 5000
+             --backend-store-uri $$MLFLOW_BACKEND_STORE_URI
+             --default-artifact-root $$MLFLOW_ARTIFACT_ROOT"
     ports:
       - "5000:5000"
-    environment:
-      - BACKEND_STORE_URI=postgresql://postgres:postgres_secret_password@db:5432/feature_store
-    command: >
-      mlflow server
-      --backend-store-uri postgresql://postgres:postgres_secret_password@db:5432/feature_store
-      --default-artifact-root ./mlruns
-      --host 0.0.0.0
-      --port 5000
     depends_on:
-      db:
+      postgres_db:
         condition: service_healthy
 
-  fastapi-backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: fastapi_recommendation_server
+  fastapi_backend:
+    image: python:3.11-slim
+    container_name: cartsense_backend
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      DATABASE_URL: postgresql+psycopg2://cartsense_user:cartsense_pass@postgres_db:5432/cartsense
+      MLFLOW_TRACKING_URI: http://mlflow_server:5000
+      ALS_MODEL_NAME: CartSense_ALS_Model
+      TFIDF_MODEL_NAME: CartSense_TFIDF_Model
+    command: >
+      sh -c "apt-get update &&
+             apt-get install -y --no-install-recommends openjdk-17-jre-headless &&
+             rm -rf /var/lib/apt/lists/* &&
+             pip install --no-cache-dir -r requirements.txt &&
+             uvicorn backend.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres_secret_password@db:5432/feature_store
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
     depends_on:
-      db:
+      postgres_db:
         condition: service_healthy
-      mlflow:
+      mlflow_server:
         condition: service_started
 
+  streamlit_frontend:
+    image: python:3.11-slim
+    container_name: cartsense_frontend
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      BACKEND_URL: http://fastapi_backend:8000
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501"
+    ports:
+      - "8501:8501"
+    depends_on:
+      - fastapi_backend
+
 volumes:
-  pgdata:
+  postgres_data:
+  mlflow_data:

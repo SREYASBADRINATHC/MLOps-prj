@@ -1,84 +1,114 @@
 import os
+from datetime import datetime, timedelta
+
 import pandas as pd
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
-# Database Connection URI from environment variable or defaulting to docker-compose config
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://postgres:postgres_secret_password@localhost:5432/feature_store"
+    "DATABASE_URL",
+    "postgresql+psycopg2://cartsense_user:cartsense_pass@localhost:5432/cartsense",
 )
 
-def run_ingestion():
-    print("🚀 Starting Data Ingestion Pipeline...")
-    
-    # 1. Create Mock Products DataFrame (5 Laptops, 5 Mobile Phones)
-    products_data = {
-        "product_id": [
-            "laptop_x1", "laptop_macbook", "laptop_xps13", "laptop_rog", "laptop_latitude",
-            "phone_iphone15", "phone_s24", "phone_pixel8", "phone_oneplus12", "phone_nothing2"
-        ],
-        "name": [
-            "ThinkPad X1 Carbon (Gen 12)", "MacBook Pro 14\" M3", "Dell XPS 13 (2026 Model)", 
-            "ROG Zephyrus G14", "Dell Latitude 5440", "iPhone 15 Pro Max", 
-            "Samsung Galaxy S24 Ultra", "Google Pixel 8 Pro", "OnePlus 12 5G", "Nothing Phone (2)"
-        ],
-        "specs": [
-            "Intel Core Ultra 7, 32GB LPDDR5X RAM, 1TB NVMe PCIe Gen4 SSD, 14\" WUXGA IPS Display",
-            "Apple M3 Pro Chip with 11‑core CPU, 14‑core GPU, 18GB Unified Memory, 512GB SSD",
-            "Intel Core Ultra 7, 16GB LPDDR5x, 512GB SSD, 13.4\" FHD+ InfinityEdge Non-Touch",
-            "AMD Ryzen 9 8945HS, NVIDIA GeForce RTX 4070, 16GB DDR5, 1TB SSD, 14\" ROG Nebula OLED",
-            "Intel Core i5-1335U, 16GB DDR4 RAM, 512GB PCIe NVMe SSD, 14\" FHD Anti-Glare",
-            "A17 Pro Chip, Triple Camera System (48MP Main), 256GB, Super Retina XDR OLED",
-            "Snapdragon 8 Gen 3, Quad Telephoto Zoom, 12GB RAM, 256GB, Dynamic AMOLED 2X",
-            "Google Tensor G3, Pro Triple Camera System, Magic Editor AI, 128GB, Super Actua Display",
-            "Snapdragon 8 Gen 3, 4th Gen Hasselblad Camera, 16GB RAM, 512GB, 120Hz 2K AMOLED",
-            "Snapdragon 8+ Gen 1, Glyph Interface 2.0, Dual 50MP Cameras, 12GB RAM, 256GB OLED"
-        ],
-        "category": [
-            "Laptop", "Laptop", "Laptop", "Laptop", "Laptop",
-            "Mobile Phone", "Mobile Phone", "Mobile Phone", "Mobile Phone", "Mobile Phone"
-        ]
-    }
-    df_products = pd.DataFrame(products_data)
-    print(f"📊 Created Products DataFrame ({len(df_products)} records):")
-    print(df_products[["product_id", "name", "category"]])
 
-    # 2. Create Mock Interaction DataFrame (user_id, product_id, rating)
-    # We will simulate ratings for some items, leaving others with 0 interactions to demonstrate Cold Start.
-    interactions_data = {
-        "user_id": [
-            101, 101, 102, 102, 103, 
-            103, 104, 104, 105, 105
-        ],
-        "product_id": [
-            "laptop_x1", "phone_iphone15", "laptop_macbook", "phone_s24", "laptop_rog",
-            "phone_pixel8", "laptop_latitude", "phone_oneplus12", "laptop_x1", "laptop_macbook"
-        ],
-        "rating": [
-            5.0, 4.5, 4.0, 5.0, 4.5,
-            4.0, 3.5, 4.5, 5.0, 4.5
-        ]
-    }
-    df_interactions = pd.DataFrame(interactions_data)
-    print(f"\n📊 Created Interactions DataFrame ({len(df_interactions)} records):")
-    print(df_interactions)
+def create_products_dataframe() -> pd.DataFrame:
+    """Create a deterministic mock catalog for laptops and mobiles."""
+    rows = [
+        (101, "Apple MacBook Pro 16 M3 Max", "Laptop", "Apple", 3499, 48, 1024, "Liquid Retina XDR", "Apple M3 Max"),
+        (102, "Dell XPS 15 OLED", "Laptop", "Dell", 2399, 32, 1024, "OLED", "Intel Core Ultra 9"),
+        (103, "Lenovo ThinkPad X1 Carbon Gen 12", "Laptop", "Lenovo", 2199, 32, 1024, "IPS", "Intel Core Ultra 7"),
+        (104, "ASUS ROG Zephyrus G16", "Laptop", "ASUS", 2599, 32, 2048, "OLED", "Intel Core Ultra 9"),
+        (105, "HP Spectre x360 14", "Laptop", "HP", 1899, 16, 1024, "OLED", "Intel Core Ultra 7"),
+        (201, "Samsung Galaxy S24 Ultra", "Mobile", "Samsung", 1299, 12, 512, "AMOLED", "Snapdragon 8 Gen 3"),
+        (202, "Apple iPhone 15 Pro Max", "Mobile", "Apple", 1399, 8, 512, "OLED", "A17 Pro"),
+        (203, "Google Pixel 9 Pro", "Mobile", "Google", 1099, 16, 256, "OLED", "Tensor G4"),
+        (204, "OnePlus 12", "Mobile", "OnePlus", 899, 16, 512, "AMOLED", "Snapdragon 8 Gen 3"),
+        (205, "Xiaomi 14 Ultra", "Mobile", "Xiaomi", 999, 16, 512, "AMOLED", "Snapdragon 8 Gen 3"),
+    ]
+    columns = [
+        "product_id",
+        "product_name",
+        "category",
+        "brand",
+        "price_usd",
+        "ram_gb",
+        "storage_gb",
+        "display_type",
+        "chipset",
+    ]
+    products_df = pd.DataFrame(rows, columns=columns)
+    products_df["specs_text"] = (
+        products_df["display_type"]
+        + ", "
+        + products_df["ram_gb"].astype(str)
+        + "GB RAM, "
+        + products_df["storage_gb"].astype(str)
+        + "GB storage, "
+        + products_df["chipset"]
+        + ", "
+        + products_df["category"]
+    )
+    return products_df
 
-    # 3. Connection and Table Insertion
+
+def create_interactions_dataframe() -> pd.DataFrame:
+    """Create deterministic user-product interactions with one true cold-start SKU."""
+    now = datetime.utcnow()
+    rows = [
+        (1, 101, 5.0, "view", now - timedelta(days=10)),
+        (1, 102, 4.5, "purchase", now - timedelta(days=8)),
+        (1, 202, 4.0, "view", now - timedelta(days=6)),
+        (2, 104, 5.0, "purchase", now - timedelta(days=9)),
+        (2, 204, 4.0, "view", now - timedelta(days=5)),
+        (2, 201, 4.5, "view", now - timedelta(days=4)),
+        (3, 103, 4.0, "view", now - timedelta(days=12)),
+        (3, 105, 4.2, "purchase", now - timedelta(days=7)),
+        (3, 203, 4.8, "purchase", now - timedelta(days=2)),
+        (4, 101, 4.6, "view", now - timedelta(days=11)),
+        (4, 201, 4.4, "purchase", now - timedelta(days=7)),
+        (5, 102, 4.9, "purchase", now - timedelta(days=10)),
+        (5, 104, 4.8, "view", now - timedelta(days=3)),
+        (5, 202, 4.3, "view", now - timedelta(days=1)),
+    ]
+    columns = ["user_id", "product_id", "rating", "event_type", "event_ts"]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def write_dataframes_to_postgres(products_df: pd.DataFrame, interactions_df: pd.DataFrame) -> None:
+    """Write DataFrames into PostgreSQL with connection drop resilience."""
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        pool_size=5,
+        max_overflow=10,
+    )
+
     try:
-        print(f"\n🔌 Connecting to database at: {DATABASE_URL.split('@')[-1]}")
-        engine = create_engine(DATABASE_URL)
-        
-        # Write DataFrames to PostgreSQL
-        # If table exists, we replace it with updated mock data
-        df_products.to_sql("products", con=engine, if_exists="replace", index=False)
-        print("✅ Pushed 'products' table to Feature Store successfully.")
+        with engine.begin() as connection:
+            products_df.to_sql("products", con=connection, if_exists="replace", index=False)
+            interactions_df.to_sql("interactions", con=connection, if_exists="replace", index=False)
+    except OperationalError as exc:
+        # Dispose stale pooled connections and retry exactly once.
+        engine.dispose()
+        try:
+            with engine.begin() as connection:
+                products_df.to_sql("products", con=connection, if_exists="replace", index=False)
+                interactions_df.to_sql("interactions", con=connection, if_exists="replace", index=False)
+        except SQLAlchemyError as retry_exc:
+            raise RuntimeError(f"Retry failed while writing to PostgreSQL: {retry_exc}") from retry_exc
+    except SQLAlchemyError as exc:
+        raise RuntimeError(f"Database write failed: {exc}") from exc
+    finally:
+        engine.dispose()
 
-        df_interactions.to_sql("interactions", con=engine, if_exists="replace", index=False)
-        print("✅ Pushed 'interactions' table to Feature Store successfully.")
-        
-    except Exception as e:
-        print(f"❌ Error during data ingestion: {str(e)}")
-        print("💡 Ensure that PostgreSQL is running and accessible (run 'docker-compose up db' first).")
+
+def main() -> None:
+    products_df = create_products_dataframe()
+    interactions_df = create_interactions_dataframe()
+    write_dataframes_to_postgres(products_df, interactions_df)
+    print(f"Loaded {len(products_df)} products and {len(interactions_df)} interactions into PostgreSQL.")
+
 
 if __name__ == "__main__":
-    run_ingestion()
+    main()

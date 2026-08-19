@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/a869d9fbe9c648e9acb540cd114af32b/artifacts
+end_time: 1786978363029
+entry_point_name: ''
+experiment_id: '241941500824683573'
+lifecycle_stage: active
+run_id: a869d9fbe9c648e9acb540cd114af32b
+run_name: exultant-sheep-60
+run_uuid: a869d9fbe9c648e9acb540cd114af32b
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1786978362895
+status: 3
+tags: []
+user_id: Sreyas

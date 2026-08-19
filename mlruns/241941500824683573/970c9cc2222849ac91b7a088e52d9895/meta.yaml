@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/970c9cc2222849ac91b7a088e52d9895/artifacts
+end_time: 1786979143042
+entry_point_name: ''
+experiment_id: '241941500824683573'
+lifecycle_stage: active
+run_id: 970c9cc2222849ac91b7a088e52d9895
+run_name: bedecked-doe-754
+run_uuid: 970c9cc2222849ac91b7a088e52d9895
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1786979142942
+status: 3
+tags: []
+user_id: Sreyas
