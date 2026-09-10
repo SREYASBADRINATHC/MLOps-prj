@@ -1640,6 +1640,122 @@
 
     .star-filled { background: var(--amber); }
     .star-empty  { background: rgba(255,255,255,0.1); }
+
+    /* ==========================================================================
+       MLOps LIFECYCLE PIPELINE WIDGET
+       ========================================================================== */
+    .mlops-lifecycle {
+      background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(20,184,166,0.06));
+      border: 1px solid rgba(99,102,241,0.2);
+      border-radius: var(--radius-lg);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .mlops-lifecycle-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .mlops-lifecycle-title {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--indigo);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .lifecycle-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border-subtle);
+      transition: var(--transition);
+      position: relative;
+    }
+
+    .lifecycle-step:hover {
+      background: rgba(99,102,241,0.06);
+      border-color: rgba(99,102,241,0.25);
+      transform: translateX(2px);
+    }
+
+    .lifecycle-step-num {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      font-weight: 800;
+      flex-shrink: 0;
+      margin-top: 1px;
+      font-family: var(--font-mono);
+    }
+
+    .lifecycle-step-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .lifecycle-step-name {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+
+    .lifecycle-step-desc {
+      font-size: 8.5px;
+      color: var(--text-muted);
+      line-height: 1.3;
+      margin-top: 2px;
+    }
+
+    .lifecycle-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      margin-top: 4px;
+    }
+
+    .lifecycle-tool-badge {
+      font-size: 7.5px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      letter-spacing: 0.02em;
+      line-height: 1.3;
+    }
+
+    .tool-blue    { color: #60A5FA; background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.2); }
+    .tool-green   { color: var(--emerald); background: var(--emerald-dim); border: 1px solid rgba(16,185,129,0.25); }
+    .tool-indigo  { color: var(--indigo); background: var(--indigo-dim); border: 1px solid rgba(99,102,241,0.25); }
+    .tool-rose    { color: var(--rose); background: var(--rose-dim); border: 1px solid rgba(244,63,94,0.25); }
+    .tool-amber   { color: var(--amber); background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.25); }
+    .tool-teal    { color: var(--teal); background: var(--teal-dim); border: 1px solid rgba(20,184,166,0.25); }
+    .tool-violet  { color: var(--violet); background: rgba(139,92,246,0.12); border: 1px solid rgba(139,92,246,0.25); }
+    .tool-sky     { color: var(--sky); background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.2); }
+
+    .lifecycle-connector {
+      width: 1px;
+      height: 4px;
+      background: linear-gradient(180deg, rgba(99,102,241,0.3), rgba(99,102,241,0.08));
+      margin-left: 17px;
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
@@ -2089,6 +2205,138 @@
               </div>
             </div>
           </div>
+
+          <!-- MLOps Lifecycle Pipeline -->
+          <div class="mlops-lifecycle">
+            <div class="mlops-lifecycle-header">
+              <div class="mlops-lifecycle-title">
+                <i data-lucide="workflow" style="width:10px;height:10px;"></i>
+                MLOps Lifecycle Pipeline
+              </div>
+              <span style="font-size:8px;font-weight:700;background:var(--emerald-dim);color:var(--emerald);padding:1px 6px;border-radius:4px;font-family:var(--font-mono);">8 STAGES</span>
+            </div>
+
+            <!-- Step 1 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:var(--teal-dim);color:var(--teal);">1</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Data Ingestion</div>
+                <div class="lifecycle-step-desc">Ingest clickstream & product data from data warehouses</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-blue">AWS Redshift</span>
+                  <span class="lifecycle-tool-badge tool-green">Pandas</span>
+                  <span class="lifecycle-tool-badge tool-indigo">BigQuery</span>
+                </div>
+              </div>
+            </div>
+            <div class="lifecycle-connector"></div>
+
+            <!-- Step 2 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:var(--indigo-dim);color:var(--indigo);">2</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Feature Engineering</div>
+                <div class="lifecycle-step-desc">Transform raw specs into vectorized feature matrices</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-indigo">PySpark</span>
+                  <span class="lifecycle-tool-badge tool-green">Scikit-Learn</span>
+                  <span class="lifecycle-tool-badge tool-teal">TF-IDF Vectorizer</span>
+                </div>
+              </div>
+            </div>
+            <div class="lifecycle-connector"></div>
+
+            <!-- Step 3 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:var(--violet);color:white;">3</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Model Training</div>
+                <div class="lifecycle-step-desc">Train ALS collaborative & content-based models</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-violet">PySpark ALS</span>
+                  <span class="lifecycle-tool-badge tool-sky">Sentence-Transformers</span>
+                  <span class="lifecycle-tool-badge tool-green">Cosine Similarity</span>
+                </div>
+              </div>
+            </div>
+            <div class="lifecycle-connector"></div>
+
+            <!-- Step 4 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:var(--sky);color:var(--bg-base);" >4</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Experiment Tracking</div>
+                <div class="lifecycle-step-desc">Log hyperparams, metrics & artifacts for reproducibility</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-sky">MLflow</span>
+                  <span class="lifecycle-tool-badge tool-amber">DVC</span>
+                  <span class="lifecycle-tool-badge tool-green">Git</span>
+                </div>
+              </div>
+            </div>
+            <div class="lifecycle-connector"></div>
+
+            <!-- Step 5 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:var(--rose-dim);color:var(--rose);">5</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Model Evaluation</div>
+                <div class="lifecycle-step-desc">Validate RMSE, precision@K & statistical drift tests</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-rose">Evidently AI</span>
+                  <span class="lifecycle-tool-badge tool-green">Sklearn Metrics</span>
+                  <span class="lifecycle-tool-badge tool-indigo">KS-Test</span>
+                </div>
+              </div>
+            </div>
+            <div class="lifecycle-connector"></div>
+
+            <!-- Step 6 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:var(--emerald-dim);color:var(--emerald);">6</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Containerized Deployment</div>
+                <div class="lifecycle-step-desc">Serve models via FastAPI in Docker on Kubernetes</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-sky">Docker</span>
+                  <span class="lifecycle-tool-badge tool-indigo">Kubernetes</span>
+                  <span class="lifecycle-tool-badge tool-green">FastAPI</span>
+                  <span class="lifecycle-tool-badge tool-teal">Gunicorn</span>
+                </div>
+              </div>
+            </div>
+            <div class="lifecycle-connector"></div>
+
+            <!-- Step 7 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:var(--amber-dim);color:var(--amber);">7</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Live Monitoring</div>
+                <div class="lifecycle-step-desc">Track concept drift, latency & model health in real-time</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-rose">Evidently AI</span>
+                  <span class="lifecycle-tool-badge tool-amber">Prometheus</span>
+                  <span class="lifecycle-tool-badge tool-green">Grafana</span>
+                </div>
+              </div>
+            </div>
+            <div class="lifecycle-connector"></div>
+
+            <!-- Step 8 -->
+            <div class="lifecycle-step">
+              <div class="lifecycle-step-num" style="background:linear-gradient(135deg,var(--indigo),var(--rose));color:white;">8</div>
+              <div class="lifecycle-step-body">
+                <div class="lifecycle-step-name">Auto Retraining (CT)</div>
+                <div class="lifecycle-step-desc">Trigger continuous training when drift exceeds threshold</div>
+                <div class="lifecycle-tools">
+                  <span class="lifecycle-tool-badge tool-indigo">CI/CD Pipeline</span>
+                  <span class="lifecycle-tool-badge tool-sky">MLflow Registry</span>
+                  <span class="lifecycle-tool-badge tool-amber">GitHub Actions</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Customer Search Analytics -->
           <div class="analytics-card" style="margin-top: 14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:12px 14px; display:flex; flex-direction:column; gap:10px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -2635,7 +2883,7 @@
       container.innerHTML = '';
       const fb = document.getElementById('filter-btn-text');
       if (fb) fb.innerText = onlyShowSearched ? 'Searched Only' : 'All Items';
-      const defaultIds = ['thinkpad','macbook','xps13','iphone16','s24ultra'];
+      const defaultIds = ['thinkpad','macbook','xps15','iphone17','s25ultra'];
       let keys = Object.keys(catalogProducts);
       if (onlyShowSearched) keys = keys.filter(k => !defaultIds.includes(k));
 
@@ -2662,10 +2910,10 @@
         const imgUrl = prod.image_url || getProductImageUrl(prod.id, prod.category);
 
         let badgeHtml = '';
-        if (key === 's24ultra') badgeHtml = `<span class="badge-new new-release">NEW</span>`;
+        if (key === 's25ultra') badgeHtml = `<span class="badge-new new-release">NEW</span>`;
         else if (!isDefault) badgeHtml = `<span class="badge-new searched">AI</span>`;
 
-        const ratingDisplay = (key === 's24ultra') ? 
+        const ratingDisplay = (key === 's25ultra') ? 
           `<span style="color:var(--amber);font-size:9px;font-weight:700;">Cold Start</span>` :
           (!isDefault ? `<span style="color:var(--indigo);font-size:9px;display:flex;align-items:center;gap:2px;"><i data-lucide="sparkles" style="width:8px;height:8px;"></i> Grounded</span>` :
           `<span style="display:flex;align-items:center;gap:2px;"><span style="color:var(--amber);font-size:9px;">★</span><span style="font-size:9px;">${prod.rating || '4.8'}</span></span>`);
@@ -2995,7 +3243,7 @@
       if (topCat) chips.push({ label: `📦 ${topCat[0]}`, color: 'chip-indigo' });
 
       // ALS insight
-      const isCold = forceColdStart || (activeProduct === 's24ultra');
+      const isCold = forceColdStart || (activeProduct === 's25ultra');
       if (isCold) chips.push({ label: '❄️ Cold Start Mode', color: 'chip-rose' });
       else if (hybridWeightALS > 70) chips.push({ label: '🤖 ALS-Dominant', color: 'chip-violet' });
       else if (hybridWeightALS < 30) chips.push({ label: '📝 Specs-Dominant', color: 'chip-teal' });
@@ -3033,7 +3281,7 @@
       const banner = document.getElementById('cold-start-fallback-banner');
       const subSummary = document.getElementById('inference-routing-summary');
       recoContainer.innerHTML = '';
-      const isColdStart = forceColdStart || (activeProduct === 's24ultra');
+      const isColdStart = forceColdStart || (activeProduct === 's25ultra');
       if (isColdStart) {
         banner.style.display = 'flex';
         subSummary.innerText = "Inference Server: v2.4.1-gunicorn (Cold Start Fallback)";
@@ -3155,7 +3403,7 @@
       const p2Wt = document.getElementById('path-2-weight-text');
       const p2Bar = document.getElementById('path-2-weight-bar-fill');
       if (!p1 || !p2) return;
-      const isCold = forceColdStart || (activeProduct === 's24ultra');
+      const isCold = forceColdStart || (activeProduct === 's25ultra');
       const wALS = isCold ? 0 : hybridWeightALS;
       const wTFIDF = isCold ? 100 : (100 - hybridWeightALS);
       if (p1Wt) p1Wt.innerText = `${wTFIDF}%`;

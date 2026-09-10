@@ -1,1 +1,1 @@
-# Backend package marker for explicit module imports.
+"""CartSense backend package."""

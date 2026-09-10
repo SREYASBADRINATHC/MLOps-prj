@@ -7,7 +7,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg2://cartsense_user:cartsense_pass@localhost:5432/cartsense",
+    "sqlite:///cartsense.db",
 )
 
 
@@ -75,14 +75,15 @@ def create_interactions_dataframe() -> pd.DataFrame:
 
 
 def write_dataframes_to_postgres(products_df: pd.DataFrame, interactions_df: pd.DataFrame) -> None:
-    """Write DataFrames into PostgreSQL with connection drop resilience."""
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_recycle=1800,
-        pool_size=5,
-        max_overflow=10,
-    )
+    """Write DataFrames into SQLite/PostgreSQL with connection drop resilience."""
+    _is_sqlite = DATABASE_URL.startswith("sqlite")
+    engine_kwargs: dict = {"pool_pre_ping": True, "pool_recycle": 1800}
+    if not _is_sqlite:
+        engine_kwargs["pool_size"] = 5
+        engine_kwargs["max_overflow"] = 10
+    if _is_sqlite:
+        engine_kwargs["connect_args"] = {"check_same_thread": False}
+    engine = create_engine(DATABASE_URL, **engine_kwargs)
 
     try:
         with engine.begin() as connection:

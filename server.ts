@@ -403,8 +403,58 @@ function generateKBRecommendations(product: KnownProduct) {
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  const FASTAPI_URL = process.env.FASTAPI_URL || "http://localhost:8000";
 
   app.use(express.json());
+
+  // ==========================================================================
+  // FASTAPI ML BACKEND PROXY — forwards ML routes to FastAPI on port 8000
+  // ==========================================================================
+  const http = await import("http");
+
+  function proxyToFastAPI(req: any, res: any, method: string, path: string, body?: any) {
+    const url = new URL(FASTAPI_URL + path);
+    const postData = body ? JSON.stringify(body) : undefined;
+    const options = {
+      hostname: url.hostname,
+      port: Number(url.port) || 8000,
+      path: url.pathname + (url.search || ""),
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(postData ? { "Content-Length": Buffer.byteLength(postData) } : {}),
+      },
+    };
+
+    const proxyReq = http.request(options, (proxyRes) => {
+      res.status(proxyRes.statusCode || 200);
+      proxyRes.pipe(res, { end: true });
+    });
+
+    proxyReq.on("error", (err) => {
+      console.error(`[Proxy] FastAPI error on ${path}:`, err.message);
+      res.status(502).json({
+        error: "FastAPI backend unavailable",
+        detail: "Start FastAPI with: .venv\\Scripts\\uvicorn backend.main:app --port 8000",
+        fastapi_url: FASTAPI_URL,
+      });
+    });
+
+    if (postData) proxyReq.write(postData);
+    proxyReq.end();
+  }
+
+  // ML product catalog (from SQLite via FastAPI)
+  app.get("/api/ml/products", (req, res) => proxyToFastAPI(req, res, "GET", "/api/products"));
+
+  // ML hybrid recommendations (TF-IDF + ALS)
+  app.post("/api/ml/recommend", (req, res) => proxyToFastAPI(req, res, "POST", "/api/recommend", req.body));
+
+  // Evidently drift metrics
+  app.get("/api/ml/drift", (req, res) => proxyToFastAPI(req, res, "GET", "/api/drift"));
+
+  // FastAPI health check
+  app.get("/api/ml/health", (req, res) => proxyToFastAPI(req, res, "GET", "/health"));
 
   // Initialize Gemini
   const apiKey = process.env.GEMINI_API_KEY;

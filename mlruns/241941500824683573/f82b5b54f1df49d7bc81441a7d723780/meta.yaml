@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/f82b5b54f1df49d7bc81441a7d723780/artifacts
+end_time: 1788605291836
+entry_point_name: ''
+experiment_id: '241941500824683573'
+lifecycle_stage: active
+run_id: f82b5b54f1df49d7bc81441a7d723780
+run_name: als_training
+run_uuid: f82b5b54f1df49d7bc81441a7d723780
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1788605283754
+status: 3
+tags: []
+user_id: Sreyas

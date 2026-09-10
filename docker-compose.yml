@@ -1,8 +1,32 @@
 version: "3.9"
 
+# ────────────────────────────────────────────────────────────────────────────
+# CartSense — Docker Compose
+# Services: postgres | mlflow | init (data gen + training) | backend | frontend
+# ────────────────────────────────────────────────────────────────────────────
+
+x-common-env: &common-env
+  DATABASE_URL: postgresql+psycopg2://cartsense_user:cartsense_pass@postgres_db:5432/cartsense
+  MLFLOW_TRACKING_URI: http://mlflow_server:5000
+  ARTIFACTS_DIR: /app/artifacts
+  TFIDF_MODEL_NAME: CartSense_TFIDF
+  ALS_MODEL_NAME: CartSense_ALS
+  ALPHA: "0.65"
+  BETA: "0.20"
+  TOP_K: "5"
+  ALS_RANK: "20"
+  ALS_MAX_ITER: "15"
+  ALS_REG_PARAM: "0.1"
+  ALS_SEED: "42"
+  DRIFT_THRESHOLD: "0.5"
+  GIT_PYTHON_REFRESH: quiet
+  JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+
 services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres_db:
-    image: postgres:15
+    image: postgres:15-alpine
     container_name: cartsense_postgres
     environment:
       POSTGRES_DB: cartsense
@@ -13,75 +37,135 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cartsense_user -d cartsense"]
+      test: [ "CMD-SHELL", "pg_isready -U cartsense_user -d cartsense" ]
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - cartsense_net
 
+  # ── MLflow Tracking Server ──────────────────────────────────────────────────
   mlflow_server:
     image: python:3.11-slim
     container_name: cartsense_mlflow
     working_dir: /app
     volumes:
       - ./:/app
-      - mlflow_data:/mlflow
+      - mlflow_artifacts:/mlflow/artifacts
     environment:
       MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://cartsense_user:cartsense_pass@postgres_db:5432/cartsense
       MLFLOW_ARTIFACT_ROOT: /mlflow/artifacts
     command: >
-      sh -c "pip install --no-cache-dir mlflow psycopg2-binary &&
+      sh -c "pip install --no-cache-dir mlflow==2.16.2 psycopg2-binary --quiet &&
              mlflow server
-             --host 0.0.0.0
-             --port 5000
-             --backend-store-uri $$MLFLOW_BACKEND_STORE_URI
-             --default-artifact-root $$MLFLOW_ARTIFACT_ROOT"
+               --backend-store-uri $$MLFLOW_BACKEND_STORE_URI
+               --default-artifact-root $$MLFLOW_ARTIFACT_ROOT
+               --host 0.0.0.0
+               --port 5000
+               --workers 4"
     ports:
       - "5000:5000"
     depends_on:
       postgres_db:
         condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\"" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - cartsense_net
 
+  # ── Init: Data Generation + Model Training ──────────────────────────────────
+  # Runs once, generates data and trains models, then exits
+  cartsense_init:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cartsense_init
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - artifacts_data:/app/artifacts
+    environment:
+      <<: *common-env
+    command: >
+      sh -c "
+        echo '=== CartSense Init: Waiting for DB...' &&
+        sleep 10 &&
+        echo '=== Step 1: Generate data ===' &&
+        python training/generate_data.py &&
+        echo '=== Step 2: Train TF-IDF ===' &&
+        python training/train_tfidf.py &&
+        echo '=== Step 3: Train ALS ===' &&
+        python training/train_als.py &&
+        echo '=== Init complete ==='
+      "
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+      mlflow_server:
+        condition: service_healthy
+    networks:
+      - cartsense_net
+    restart: "no"
+
+  # ── FastAPI Backend ─────────────────────────────────────────────────────────
   fastapi_backend:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: cartsense_backend
     working_dir: /app
     volumes:
       - ./:/app
+      - artifacts_data:/app/artifacts
     environment:
-      DATABASE_URL: postgresql+psycopg2://cartsense_user:cartsense_pass@postgres_db:5432/cartsense
-      MLFLOW_TRACKING_URI: http://mlflow_server:5000
-      ALS_MODEL_NAME: CartSense_ALS_Model
-      TFIDF_MODEL_NAME: CartSense_TFIDF_Model
-    command: >
-      sh -c "apt-get update &&
-             apt-get install -y --no-install-recommends openjdk-17-jre-headless &&
-             rm -rf /var/lib/apt/lists/* &&
-             pip install --no-cache-dir -r requirements.txt &&
-             uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+      <<: *common-env
+      BACKEND_URL: http://fastapi_backend:8000
     ports:
       - "8000:8000"
     depends_on:
       postgres_db:
         condition: service_healthy
       mlflow_server:
-        condition: service_started
+        condition: service_healthy
+      cartsense_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - cartsense_net
 
+  # ── Streamlit Frontend ──────────────────────────────────────────────────────
   streamlit_frontend:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: cartsense_frontend
     working_dir: /app
     volumes:
       - ./:/app
     environment:
       BACKEND_URL: http://fastapi_backend:8000
-    command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
-             streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501"
     ports:
       - "8501:8501"
     depends_on:
-      - fastapi_backend
+      fastapi_backend:
+        condition: service_healthy
+    networks:
+      - cartsense_net
 
 volumes:
   postgres_data:
-  mlflow_data:
+  mlflow_artifacts:
+  artifacts_data:
+
+networks:
+  cartsense_net:
+    driver: bridge

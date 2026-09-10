@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/60c4ec48819d47678d3c604256e8817d/artifacts
+end_time: 1789030171441
+entry_point_name: ''
+experiment_id: '241941500824683573'
+lifecycle_stage: active
+run_id: 60c4ec48819d47678d3c604256e8817d
+run_name: tfidf_training
+run_uuid: 60c4ec48819d47678d3c604256e8817d
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789030170651
+status: 4
+tags: []
+user_id: root

@@ -1,13 +1,41 @@
+# CartSense — Python Dependencies
+# ─────────────────────────────────────
+
+# Web framework
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+pydantic>=2.0.0
+
+# Frontend
 streamlit==1.38.0
+plotly==5.24.1
+
+# HTTP
 requests==2.32.3
+
+# Data
 pandas==2.2.2
 numpy==1.26.4
+scipy==1.13.1
+
+# Database
 SQLAlchemy==2.0.34
 psycopg2-binary==2.9.9
+
+# Machine Learning
 scikit-learn==1.5.1
+joblib==1.4.2
+
+# Distributed computing (for ALS training)
 pyspark==3.5.2
+
+# MLOps
 mlflow==2.16.2
+
+# Drift detection
 evidently==0.4.37
-plotly==5.24.1
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+httpx==0.27.2

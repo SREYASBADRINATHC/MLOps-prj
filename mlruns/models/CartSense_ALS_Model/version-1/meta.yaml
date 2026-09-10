@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1788605291823
+current_stage: None
+description: null
+last_updated_timestamp: 1788605291823
+name: CartSense_ALS_Model
+run_id: f82b5b54f1df49d7bc81441a7d723780
+run_link: null
+source: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/f82b5b54f1df49d7bc81441a7d723780/artifacts/als_model
+status: READY
+status_message: null
+storage_location: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/f82b5b54f1df49d7bc81441a7d723780/artifacts/als_model
+user_id: null
+version: 1

@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1788605296056
+current_stage: None
+description: null
+last_updated_timestamp: 1788605296056
+name: CartSense_TFIDF_Model
+run_id: 3ee4035874ed49528e380218d1aad1ce
+run_link: null
+source: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/3ee4035874ed49528e380218d1aad1ce/artifacts/tfidf_vectorizer
+status: READY
+status_message: null
+storage_location: file:///C:/Users/Sreyas/OneDrive/Documents/GitHub/MLOps-prj/mlruns/241941500824683573/3ee4035874ed49528e380218d1aad1ce/artifacts/tfidf_vectorizer
+user_id: null
+version: 1

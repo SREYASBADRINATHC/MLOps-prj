@@ -23,7 +23,8 @@ DATABASE_URL = os.getenv(
 engine = None
 SessionLocal = None
 try:
-    engine = create_engine(DATABASE_URL, connect_args={"connect_timeout": 5})
+    connect_args = {"timeout": 5} if DATABASE_URL.startswith("sqlite") else {"connect_timeout": 5}
+    engine = create_engine(DATABASE_URL, connect_args=connect_args)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     print("🔌 SQLAlchemy configured for PostgreSQL database connection.")
 except Exception as e:
