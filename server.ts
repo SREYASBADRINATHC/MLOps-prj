@@ -402,8 +402,8 @@ function generateKBRecommendations(product: KnownProduct) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
-  const FASTAPI_URL = process.env.FASTAPI_URL || "http://localhost:8000";
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+  const FASTAPI_URL = process.env.FASTAPI_URL || process.env.VITE_PROXY_TARGET || "http://localhost:8000";
 
   app.use(express.json());
 
@@ -413,11 +413,11 @@ async function startServer() {
   const http = await import("http");
 
   function proxyToFastAPI(req: any, res: any, method: string, path: string, body?: any) {
-    const url = new URL(FASTAPI_URL + path);
+    const url = new URL(path, FASTAPI_URL);
     const postData = body ? JSON.stringify(body) : undefined;
     const options = {
       hostname: url.hostname,
-      port: Number(url.port) || 8000,
+      port: Number(url.port) || (url.protocol === "https:" ? 443 : 80),
       path: url.pathname + (url.search || ""),
       method,
       headers: {
@@ -427,7 +427,7 @@ async function startServer() {
     };
 
     const proxyReq = http.request(options, (proxyRes) => {
-      res.status(proxyRes.statusCode || 200);
+      res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
       proxyRes.pipe(res, { end: true });
     });
 
@@ -446,15 +446,24 @@ async function startServer() {
 
   // ML product catalog (from SQLite via FastAPI)
   app.get("/api/ml/products", (req, res) => proxyToFastAPI(req, res, "GET", "/api/products"));
+  app.get("/api/products", (req, res) => proxyToFastAPI(req, res, "GET", req.originalUrl || "/api/products"));
 
   // ML hybrid recommendations (TF-IDF + ALS)
   app.post("/api/ml/recommend", (req, res) => proxyToFastAPI(req, res, "POST", "/api/recommend", req.body));
+  app.post("/api/recommend", (req, res) => proxyToFastAPI(req, res, "POST", "/api/recommend", req.body));
 
   // Evidently drift metrics
   app.get("/api/ml/drift", (req, res) => proxyToFastAPI(req, res, "GET", "/api/drift"));
+  app.get("/api/drift", (req, res) => proxyToFastAPI(req, res, "GET", "/api/drift"));
 
   // FastAPI health check
-  app.get("/api/ml/health", (req, res) => proxyToFastAPI(req, res, "GET", "/health"));
+  app.get("/api/ml/health", (req, res) => proxyToFastAPI(req, res, "GET", "/api/health"));
+  app.get("/api/health", (req, res) => proxyToFastAPI(req, res, "GET", "/api/health"));
+
+  // Additional FastAPI endpoints
+  app.get("/api/stats", (req, res) => proxyToFastAPI(req, res, "GET", "/api/stats"));
+  app.get("/api/models/status", (req, res) => proxyToFastAPI(req, res, "GET", "/api/models/status"));
+  app.post("/api/retrain", (req, res) => proxyToFastAPI(req, res, "POST", "/api/retrain", req.body));
 
   // Initialize Gemini
   const apiKey = process.env.GEMINI_API_KEY;
@@ -730,6 +739,16 @@ Return ONLY raw JSON (no markdown):
   });
 
   // ==========================================================================
+  // STATIC / HTML ROUTES
+  // ==========================================================================
+  app.get("/", (req, res) => {
+    res.sendFile(path.resolve(process.cwd(), "index.html"));
+  });
+  app.get("/index.html", (req, res) => {
+    res.sendFile(path.resolve(process.cwd(), "index.html"));
+  });
+
+  // ==========================================================================
   // STATIC / VITE DEV SERVER
   // ==========================================================================
   if (process.env.NODE_ENV !== "production") {
@@ -739,6 +758,17 @@ Return ONLY raw JSON (no markdown):
         appType: "spa",
       });
       app.use(vite.middlewares);
+      app.use("*", async (req, res, next) => {
+        try {
+          const fs = await import("fs/promises");
+          let template = await fs.readFile(path.resolve(process.cwd(), "index.html"), "utf-8");
+          template = await vite.transformIndexHtml(req.originalUrl, template);
+          res.status(200).set({ "Content-Type": "text/html" }).end(template);
+        } catch (e: any) {
+          vite.ssrFixStacktrace?.(e);
+          next(e);
+        }
+      });
     } catch (e) {
       // Vite not available — serve static files directly
       app.use(express.static(process.cwd()));

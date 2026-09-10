@@ -118,31 +118,18 @@ def train_tfidf_artifacts(products_df: pd.DataFrame, interactions_df: pd.DataFra
     logger.info("TF-IDF fitted: vocab=%d, docs=%d", len(vectorizer.vocabulary_), len(product_ids))
 
     # Quick evaluation
-    pid_to_idx = {pid: i for i, pid in enumerate(product_ids)}
-    y_true, y_pred = [], []
+    from training.evaluate import evaluate_tfidf
+    
     interactions_df = interactions_df.copy()
     interactions_df["timestamp"] = pd.to_datetime(interactions_df["timestamp"])
     train_cut = int(len(interactions_df) * 0.80)
-    train_ints = interactions_df.iloc[:train_cut]
-    test_ints = interactions_df.iloc[train_cut:]
+    train_df = interactions_df.iloc[:train_cut]
+    test_df = interactions_df.iloc[train_cut:]
 
-    for _, row in test_ints.iterrows():
-        if pd.isna(row.get("rating")):
-            continue
-        pid = row["product_id"]
-        if pid not in pid_to_idx:
-            continue
-        anchor_idx = pid_to_idx[pid]
-        peers = train_ints[train_ints["user_id"] == row["user_id"]]["product_id"].tolist()
-        peer_idxs = [pid_to_idx[p] for p in peers if p in pid_to_idx and p != pid]
-        if not peer_idxs:
-            continue
-        sims = cosine_similarity(tfidf_matrix[anchor_idx], tfidf_matrix[peer_idxs]).flatten()
-        y_pred.append(1.0 + 4.0 * float(sims.mean()))
-        y_true.append(float(row["rating"]))
-
-    rmse = math.sqrt(mean_squared_error(y_true, y_pred)) if len(y_true) > 0 else float("nan")
-    metrics = {"rmse": round(rmse, 4) if not math.isnan(rmse) else 0.0}
+    metrics = evaluate_tfidf(
+        train_df, test_df, products_df,
+        vectorizer, tfidf_matrix, product_ids, k=5
+    )
 
     return vectorizer, tfidf_matrix, product_ids, metrics
 
@@ -163,41 +150,55 @@ def train_als_artifacts(interactions_df: pd.DataFrame, products_df: pd.DataFrame
         interactions_df, products_df
     )
     train_df, test_df = temporal_split(df, 0.80)
-    _, user_factors, item_factors = train_als_spark(
+    model, user_factors, item_factors = train_als_spark(
         train_df, rank=ALS_RANK, max_iter=ALS_MAX_ITER, reg_param=ALS_REG_PARAM, seed=ALS_SEED
     )
     metrics = evaluate_als(test_df, user_factors, item_factors, int_to_item, K=5)
-    return user_factors, item_factors, user_to_int, int_to_user, item_to_int, int_to_item, metrics
+    return model, user_factors, item_factors, user_to_int, int_to_user, item_to_int, int_to_item, metrics
 
 
 # ── Step 5: Quality Gate ──────────────────────────────────────────────────────
 
-def quality_gate(new_metrics: dict, artifacts_dir: str) -> tuple[bool, str]:
+def quality_gate(new_tfidf_metrics: dict, new_als_metrics: dict) -> tuple[bool, str]:
     """
-    Compare new model against production.
-
+    Compare new models against MLflow @champion models.
     Pass condition:
-    - No production model exists → always promote
-    - New RMSE ≤ production RMSE × 1.05 (5% regression tolerance)
+    - Both TF-IDF and ALS Precision@5 >= 0.01
+    - Both TF-IDF and ALS Precision@5 >= max(production Precision@5 * 0.95, 0.01)
     """
-    meta_path = Path(artifacts_dir) / "tfidf_metadata.json"
-    if not meta_path.exists():
-        return True, "No production model — promoting new model."
+    from mlflow.tracking import MlflowClient
+    client = MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
 
-    with open(meta_path) as f:
-        prod_meta = json.load(f)
-    prod_rmse = prod_meta.get("metrics", {}).get("rmse", float("inf"))
-    new_rmse = new_metrics.get("rmse", float("inf"))
+    # 1. Evaluate TF-IDF
+    new_tfidf_prec = new_tfidf_metrics.get("precision_at_5", new_tfidf_metrics.get("precision_at_k", 0.0))
+    if new_tfidf_prec < 0.01:
+        return False, f"New TF-IDF Precision@5 is too low ({new_tfidf_prec:.4f} < 0.01) — REJECTED."
 
-    if new_rmse == 0.0:
-        return True, "New RMSE is 0 (insufficient test data) — promoting with caution."
-    if prod_rmse == 0.0:
-        return True, "Production RMSE is 0 — promoting new model."
+    try:
+        tfidf_champ = client.get_model_version_by_alias(TFIDF_MODEL_NAME, "champion")
+        tfidf_run = client.get_run(tfidf_champ.run_id)
+        prod_tfidf_prec = float(tfidf_run.data.metrics.get("precision_at_5", tfidf_run.data.metrics.get("precision_at_k", 0.0)))
+        if prod_tfidf_prec > 0.0 and new_tfidf_prec < prod_tfidf_prec * 0.95:
+            return False, f"New TF-IDF Precision@5 {new_tfidf_prec:.4f} degraded vs prod {prod_tfidf_prec:.4f} — REJECTED."
+    except Exception as e:
+        logger.info("No champion TF-IDF found in MLflow or error fetching: %s", e)
 
-    tolerance = prod_rmse * 1.05
-    if new_rmse <= tolerance:
-        return True, f"New RMSE {new_rmse:.4f} ≤ threshold {tolerance:.4f} — PROMOTED."
-    return False, f"New RMSE {new_rmse:.4f} > threshold {tolerance:.4f} — REJECTED."
+    # 2. Evaluate ALS
+    if new_als_metrics:
+        new_als_prec = new_als_metrics.get("precision_at_5", new_als_metrics.get("precision_at_k", 0.0))
+        if new_als_prec < 0.01:
+            return False, f"New ALS Precision@5 is too low ({new_als_prec:.4f} < 0.01) — REJECTED."
+
+        try:
+            als_champ = client.get_model_version_by_alias(ALS_MODEL_NAME, "champion")
+            als_run = client.get_run(als_champ.run_id)
+            prod_als_prec = float(als_run.data.metrics.get("precision_at_5", als_run.data.metrics.get("precision_at_k", 0.0)))
+            if prod_als_prec > 0.0 and new_als_prec < prod_als_prec * 0.95:
+                return False, f"New ALS Precision@5 {new_als_prec:.4f} degraded vs prod {prod_als_prec:.4f} — REJECTED."
+        except Exception as e:
+            logger.info("No champion ALS found in MLflow or error fetching: %s", e)
+
+    return True, "All models passed the quality gate — PROMOTED."
 
 
 # ── Step 6: Save & Log ────────────────────────────────────────────────────────
@@ -283,11 +284,11 @@ def main() -> None:
 
     # 4. Train ALS (best-effort; skip if Spark unavailable)
     als_metrics = {}
-    user_factors = item_factors = None
+    user_factors = item_factors = als_model = None
     user_to_int = int_to_user = item_to_int = int_to_item = {}
     try:
         logger.info("Training PySpark ALS...")
-        user_factors, item_factors, user_to_int, int_to_user, item_to_int, int_to_item, als_metrics = (
+        als_model, user_factors, item_factors, user_to_int, int_to_user, item_to_int, int_to_item, als_metrics = (
             train_als_artifacts(interactions_df, products_df)
         )
     except Exception as exc:
@@ -295,18 +296,16 @@ def main() -> None:
 
     # 5. Quality gate
     combined_metrics = {**tfidf_metrics, **als_metrics}
-    passed, gate_msg = quality_gate(tfidf_metrics, ARTIFACTS_DIR)
+    passed, gate_msg = quality_gate(tfidf_metrics, als_metrics)
     logger.info("Quality gate: %s — %s", "PASS" if passed else "FAIL", gate_msg)
 
     # 6. MLflow logging
-    mlflow_run_id = None
-    for uri in [MLFLOW_TRACKING_URI, "./mlruns"]:
-        try:
-            mlflow.set_tracking_uri(uri)
-            mlflow.search_experiments()
-            break
-        except Exception:
-            pass
+    try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.search_experiments()
+    except Exception as e:
+        logger.error("MLflow URI %s unreachable. Failing the run. %s", MLFLOW_TRACKING_URI, e)
+        raise RuntimeError(f"Cannot connect to MLflow at {MLFLOW_TRACKING_URI}") from e
 
     mlflow.set_experiment("CartSense_Hybrid_Recommendation")
     with mlflow.start_run(run_name=f"retrain_{model_version}") as run:
@@ -323,6 +322,30 @@ def main() -> None:
         })
         mlflow.log_metrics({k: v for k, v in combined_metrics.items() if isinstance(v, float) and not (v != v)})
         mlflow_run_id = run.info.run_id
+        
+        # Only register models if quality gate passed
+        if passed:
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
+            
+            # Register TF-IDF
+            tfidf_model_info = mlflow.sklearn.log_model(
+                sk_model=vectorizer,
+                artifact_path="tfidf_vectorizer",
+                registered_model_name=TFIDF_MODEL_NAME
+            )
+            client.set_registered_model_alias(TFIDF_MODEL_NAME, "champion", tfidf_model_info.registered_model_version)
+            logger.info("TFIDF model registered and set as @champion version %s", tfidf_model_info.registered_model_version)
+            
+            # Register ALS
+            if als_model is not None:
+                als_model_info = mlflow.spark.log_model(
+                    spark_model=als_model,
+                    artifact_path="als_model",
+                    registered_model_name=ALS_MODEL_NAME
+                )
+                client.set_registered_model_alias(ALS_MODEL_NAME, "champion", als_model_info.registered_model_version)
+                logger.info("ALS model registered and set as @champion version %s", als_model_info.registered_model_version)
 
     if not passed:
         logger.warning("New model REJECTED. Production model unchanged.")

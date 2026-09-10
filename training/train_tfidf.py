@@ -31,7 +31,6 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy import create_engine, text
 
@@ -231,15 +230,13 @@ def log_to_mlflow(
     metadata: dict,
 ) -> str:
     """Log TF-IDF model and metrics to MLflow."""
-    # Connect to MLflow with fallback
-    for uri in [MLFLOW_TRACKING_URI, "./mlruns"]:
-        try:
-            mlflow.set_tracking_uri(uri)
-            mlflow.search_experiments()
-            logger.info("MLflow connected at %s", uri)
-            break
-        except Exception:
-            logger.warning("MLflow URI %s unreachable, trying fallback.", uri)
+    try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.search_experiments()
+        logger.info("MLflow connected at %s", MLFLOW_TRACKING_URI)
+    except Exception as e:
+        logger.error("MLflow URI %s unreachable. Failing the run. %s", MLFLOW_TRACKING_URI, e)
+        raise RuntimeError(f"Cannot connect to MLflow at {MLFLOW_TRACKING_URI}") from e
 
     mlflow.set_experiment("CartSense_Hybrid_Recommendation")
 

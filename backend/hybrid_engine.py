@@ -13,9 +13,18 @@ Implements the core routing and scoring logic:
   NEW USER (no interaction history):
       Fallback: TF-IDF + Spec Matching (labeled "new_user_fallback")
 
+# Configuration weights (using existing config names for compatibility):
+#   ALPHA = ALS weight
+#   TFIDF_WEIGHT = 1 - ALPHA
+#   SPEC_BOOST_WEIGHT = BETA (additive boost up to a max of 1.0)
+#
+#   For cold-start:
+#   TFIDF_WEIGHT_COLD_START = 1 - BETA
+#   SPEC_BOOST_WEIGHT = BETA
+
 Scores are normalized before blending to handle different raw score ranges.
 Final formula:
-    FinalScore = alpha * NormalizedALS + (1-alpha) * TF-IDF + beta * SpecBoost
+    FinalScore = (ALPHA * NormalizedALS) + ((1 - ALPHA) * TF-IDF) + (BETA * SpecBoost)
 
 All normalization is min-max within the candidate set.
 """
@@ -278,9 +287,9 @@ class HybridRecommendationEngine:
             "alpha": self.alpha,
             "beta": self.beta,
             "formula": (
-                f"FinalScore = {self.alpha}*ALS + {1-self.alpha:.2f}*TF-IDF + {self.beta}*SpecBoost"
+                f"FinalScore = {self.alpha}*(ALS) + {1-self.alpha:.2f}*(TF-IDF) + {self.beta}*(SpecBoost)"
                 if mode == "hybrid"
-                else "FinalScore = TF-IDF + SpecBoost (ALS skipped)"
+                else f"FinalScore = {1-self.beta:.2f}*(TF-IDF) + {self.beta}*(SpecBoost) (ALS skipped)"
             ),
             "als_skipped_reason": (
                 None if als_used else (

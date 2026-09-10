@@ -174,13 +174,14 @@ with st.sidebar:
     page = st.radio(
         "Navigation",
         options=[
-            "🏠 Home / Overview",
+            "🏠 Home",
             "📦 Product Catalog",
-            "🎯 Recommendations",
-            "❄️ Cold-Start Demo",
+            "🎯 Get Recommendations",
+            "❄️ Cold Start Demo",
             "📊 MLOps Dashboard",
             "🌊 Drift Simulation",
-            "🔬 Model / Experiments",
+            "🔬 Model Comparison",
+            "📖 About Project",
         ],
         label_visibility="collapsed",
     )
@@ -215,7 +216,7 @@ with st.sidebar:
 # PAGE A — HOME / OVERVIEW
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if page == "🏠 Home / Overview":
+if page == "🏠 Home":
     st.markdown("# 🛒 CartSense")
     st.markdown(
         "### Drift-Resilient Hybrid Recommendation Engine for Electronics\n"
@@ -264,6 +265,41 @@ if page == "🏠 Home / Overview":
         ts = model_status.get("training_timestamp", "N/A")
         if ts and ts != "N/A":
             st.caption(f"Last trained: {ts[:19].replace('T', ' ')} UTC")
+
+    # ── MLOps Summary ─────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📡 MLOps Summary")
+    drift_status = api_get("/api/drift")
+    if not show_error(drift_status):
+        drift_detected = drift_status.get("dataset_drift_detected", False)
+        retraining_recommended = drift_status.get("retraining_recommended", False)
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Drift Status", "⚠️ Detected" if drift_detected else "✓ Stable")
+        col_m2.metric("Retraining", "Required" if retraining_recommended else "Up to date")
+        col_m3.metric("Current Champion", model_status.get("model_version", "N/A") if not show_error(model_status) else "N/A")
+
+    # ── Recommendation Preview ────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🎯 Quick Recommendation Preview")
+    products = api_get("/api/products?limit=50")
+    if not show_error(products):
+        prod_df = pd.DataFrame(products)
+        prod_options = prod_df.apply(lambda r: f"{r['product_id']} | {r['name'][:40]}", axis=1).tolist()
+        
+        pr1, pr2 = st.columns(2)
+        with pr1:
+            preview_user = st.text_input("User ID (Preview)", value="U0001")
+        with pr2:
+            preview_prod_str = st.selectbox("Product (Preview)", prod_options)
+            preview_pid = preview_prod_str.split(" | ")[0] if preview_prod_str else ""
+            
+        if st.button("Preview Recommendations", type="primary"):
+            with st.spinner("Fetching..."):
+                res = api_post("/api/recommend", {"user_id": preview_user, "product_id": preview_pid, "top_k": 3})
+            if not show_error(res):
+                st.success(f"Mode: **{res.get('recommendation_mode', 'N/A').upper()}** | Score Formula: {res.get('explanation', {}).get('formula', 'N/A')}")
+                for i, rec in enumerate(res.get("recommendations", []), 1):
+                    st.markdown(f"**{i}. {rec['name']}** - Final Score: {rec['final_score']:.3f} *(ALS: {rec.get('als_score','N/A')}, TF-IDF: {rec.get('tfidf_score','N/A')})*")
 
     # ── Architecture Diagram ──────────────────────────────────────────────────
     st.markdown("---")
@@ -394,8 +430,8 @@ elif page == "📦 Product Catalog":
 # PAGE C — RECOMMENDATIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-elif page == "🎯 Recommendations":
-    st.markdown("# 🎯 Recommendations")
+elif page == "🎯 Get Recommendations":
+    st.markdown("# 🎯 Get Recommendations")
     st.markdown("Configure a recommendation request. Scores come directly from the FastAPI backend — no frontend computation.")
 
     # ── Load users and products for selectors ─────────────────────────────────
@@ -499,7 +535,7 @@ elif page == "🎯 Recommendations":
 # PAGE D — COLD-START DEMO
 # ═══════════════════════════════════════════════════════════════════════════════
 
-elif page == "❄️ Cold-Start Demo":
+elif page == "❄️ Cold Start Demo":
     st.markdown("# ❄️ Item Cold-Start Demonstration")
     st.markdown(
         "Select a **new product** (interaction_count = 0) to see how CartSense handles "
@@ -828,8 +864,8 @@ This page demonstrates the **concept drift detection and retraining pipeline**.
 # PAGE G — MODEL / EXPERIMENTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-elif page == "🔬 Model / Experiments":
-    st.markdown("# 🔬 Model & Experiment Details")
+elif page == "🔬 Model Comparison":
+    st.markdown("# 🔬 Model Comparison")
 
     model_status = api_get("/api/model/status")
     mlflow_exps = api_get("/api/mlflow/experiments")
@@ -906,17 +942,68 @@ elif page == "🔬 Model / Experiments":
     st.markdown("---")
     st.markdown("### 📊 Model Comparison (Baseline vs CartSense Hybrid)")
     st.markdown("""
-To run a real baseline comparison, trigger the evaluation via the retraining pipeline.
-The table below shows the design target comparisons:
+    The table below shows the actual evaluated metrics for the currently loaded models.
     """)
+
+    # Fetch real metrics from the current model status
+    tfidf_precision = "N/A"
+    tfidf_recall = "N/A"
+    tfidf_ndcg = "N/A"
+    als_precision = "N/A"
+    als_recall = "N/A"
+    als_ndcg = "N/A"
+
+    if not show_error(model_status):
+        tfidf_m = model_status.get("tfidf_metrics", {})
+        als_m = model_status.get("als_metrics", {})
+        
+        if tfidf_m:
+            tfidf_precision = f"{tfidf_m.get('precision_at_5', 0):.3f}"
+            tfidf_recall = f"{tfidf_m.get('recall_at_5', 0):.3f}"
+            tfidf_ndcg = f"{tfidf_m.get('ndcg_at_5', 0):.3f}"
+        
+        if als_m:
+            als_precision = f"{als_m.get('precision_at_5', 0):.3f}"
+            als_recall = f"{als_m.get('recall_at_5', 0):.3f}"
+            als_ndcg = f"{als_m.get('ndcg_at_5', 0):.3f}"
 
     comparison_data = {
         "Model": ["Popularity Baseline", "TF-IDF Only", "ALS Only", "CartSense Hybrid"],
-        "Precision@5": ["~0.05", "~0.12", "~0.18", "~0.22"],
-        "Recall@5": ["~0.08", "~0.15", "~0.20", "~0.25"],
-        "NDCG@5": ["~0.06", "~0.14", "~0.19", "~0.24"],
+        "Precision@5": ["N/A (No model)", tfidf_precision, als_precision, "Dynamic Routing"],
+        "Recall@5": ["N/A (No model)", tfidf_recall, als_recall, "Dynamic Routing"],
+        "NDCG@5": ["N/A (No model)", tfidf_ndcg, als_ndcg, "Dynamic Routing"],
         "Cold-Start": ["❌ No", "✅ Yes", "❌ No", "✅ Yes"],
         "Drift-Resilient": ["❌ No", "⚠️ Partial", "❌ No", "✅ Yes"],
     }
     st.table(pd.DataFrame(comparison_data).set_index("Model"))
-    st.caption("*Note: Values above are architectural estimates. Actual metrics are computed from real test data after training.*")
+    st.caption("*Note: The CartSense Hybrid does not have a single offline metric because it routes dynamically based on user and item states. The TF-IDF and ALS values are real metrics evaluated during the last training run.*")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE H — ABOUT PROJECT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+elif page == "📖 About Project":
+    st.markdown("# 📖 About CartSense")
+    st.markdown("""
+    ### Project Overview
+    **CartSense** is an advanced MLOps-driven recommendation system designed to solve two of the hardest challenges in e-commerce: **Item Cold-Start** and **Concept Drift**.
+
+    ### 1. The Item Cold-Start Problem
+    Traditional Collaborative Filtering (like ALS) fails when a new product is added to the catalog because it has zero user interactions.
+    CartSense solves this by implementing a **Hybrid Routing Architecture**:
+    - **Warm Items**: Uses Matrix Factorization (PySpark ALS) based on behavioral data.
+    - **Cold Items**: Dynamically routes to a **Content-Based TF-IDF** engine that analyzes the product's name, brand, and specifications using cosine similarity.
+
+    ### 2. Concept Drift Detection
+    Consumer electronics markets move fast. When OLED screens or 64GB RAM become the new standard, older models trained on IPS screens and 16GB RAM become stale.
+    - CartSense integrates with **Evidently AI** to perform continuous statistical monitoring (Kolmogorov-Smirnov tests) on the product catalog.
+    - If significant drift is detected, the system automatically triggers a PySpark retraining pipeline.
+
+    ### 3. MLOps Lifecycle
+    1. **Data Generation**: Simulated user interaction logs and product catalogs.
+    2. **Drift Monitoring**: Scheduled checks on feature distributions.
+    3. **Automated Retraining**: A robust pipeline trains both ALS and TF-IDF models simultaneously.
+    4. **Quality Gates**: Models are evaluated against strict thresholds (e.g., Precision@5, NDCG@5, RMSE).
+    5. **MLflow Registry**: Models passing the quality gate are promoted to the `@champion` alias.
+    6. **Zero-Downtime Reload**: The FastAPI backend hot-reloads the new champion models without interrupting the user experience.
+    """)

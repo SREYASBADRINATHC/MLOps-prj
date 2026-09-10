@@ -174,7 +174,6 @@ def train_als_spark(
     user_factors = model.userFactors.toPandas()
     item_factors = model.itemFactors.toPandas()
 
-    spark.stop()
     return model, user_factors, item_factors
 
 
@@ -288,16 +287,15 @@ def save_als_artifacts(
     logger.info("Saved ALS metadata → %s", meta_path)
 
 
-def log_als_to_mlflow(metadata: dict, metrics: dict) -> str:
-    """Log ALS run to MLflow (parameters + metrics only; factors stored locally)."""
-    for uri in [MLFLOW_TRACKING_URI, "./mlruns"]:
-        try:
-            mlflow.set_tracking_uri(uri)
-            mlflow.search_experiments()
-            logger.info("MLflow connected at %s", uri)
-            break
-        except Exception:
-            logger.warning("MLflow URI %s unreachable.", uri)
+def log_als_to_mlflow(metadata: dict, metrics: dict, model=None) -> str:
+    """Log ALS run to MLflow (parameters + metrics + model registry)."""
+    try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.search_experiments()
+        logger.info("MLflow connected at %s", MLFLOW_TRACKING_URI)
+    except Exception as e:
+        logger.error("MLflow URI %s unreachable. Failing the run. %s", MLFLOW_TRACKING_URI, e)
+        raise RuntimeError(f"Cannot connect to MLflow at {MLFLOW_TRACKING_URI}") from e
 
     mlflow.set_experiment("CartSense_Hybrid_Recommendation")
 
@@ -316,6 +314,15 @@ def log_als_to_mlflow(metadata: dict, metrics: dict) -> str:
         mlflow.log_metrics(metrics)
         # Log local artifact folder
         mlflow.log_artifacts(ARTIFACTS_DIR, artifact_path="als_artifacts")
+        
+        if model is not None:
+            mlflow.spark.log_model(
+                spark_model=model,
+                artifact_path="als_model",
+                registered_model_name=ALS_MODEL_NAME
+            )
+            logger.info("ALS model registered in MLflow registry as %s", ALS_MODEL_NAME)
+            
         return run.info.run_id
 
 
@@ -340,7 +347,7 @@ def main() -> None:
     train_df, test_df = temporal_split(df, train_frac=0.80)
     logger.info("Train size: %d | Test size: %d", len(train_df), len(test_df))
 
-    _, user_factors, item_factors = train_als_spark(
+    model, user_factors, item_factors = train_als_spark(
         train_df,
         rank=ALS_RANK,
         max_iter=ALS_MAX_ITER,
@@ -370,7 +377,7 @@ def main() -> None:
         metadata,
     )
 
-    run_id = log_als_to_mlflow(metadata, metrics)
+    run_id = log_als_to_mlflow(metadata, metrics, model=model)
 
     elapsed = time.time() - t0
     print(f"✅ ALS training complete in {elapsed:.1f}s")

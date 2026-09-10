@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ────────────────────────────────────────────────────────────────────────────
 # CartSense — Docker Compose
 # Services: postgres | mlflow | init (data gen + training) | backend | frontend
@@ -18,7 +16,7 @@ x-common-env: &common-env
   ALS_MAX_ITER: "15"
   ALS_REG_PARAM: "0.1"
   ALS_SEED: "42"
-  DRIFT_THRESHOLD: "0.5"
+  DRIFT_THRESHOLD: "0.75"
   GIT_PYTHON_REFRESH: quiet
   JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
 
@@ -46,23 +44,27 @@ services:
 
   # ── MLflow Tracking Server ──────────────────────────────────────────────────
   mlflow_server:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile: mlflow/Dockerfile
+    image: cartsense-mlflow:2.16.2
     container_name: cartsense_mlflow
     working_dir: /app
     volumes:
-      - ./:/app
       - mlflow_artifacts:/mlflow/artifacts
     environment:
       MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://cartsense_user:cartsense_pass@postgres_db:5432/cartsense
       MLFLOW_ARTIFACT_ROOT: /mlflow/artifacts
-    command: >
-      sh -c "pip install --no-cache-dir mlflow==2.16.2 psycopg2-binary --quiet &&
-             mlflow server
-               --backend-store-uri $$MLFLOW_BACKEND_STORE_URI
-               --default-artifact-root $$MLFLOW_ARTIFACT_ROOT
-               --host 0.0.0.0
-               --port 5000
-               --workers 4"
+    command:
+      - sh
+      - -c
+      - >-
+        exec mlflow server
+        --backend-store-uri "$$MLFLOW_BACKEND_STORE_URI"
+        --default-artifact-root "$$MLFLOW_ARTIFACT_ROOT"
+        --host 0.0.0.0
+        --port 5000
+        --workers 4
     ports:
       - "5000:5000"
     depends_on:
@@ -76,6 +78,7 @@ services:
       start_period: 30s
     networks:
       - cartsense_net
+    restart: unless-stopped
 
   # ── Init: Data Generation + Model Training ──────────────────────────────────
   # Runs once, generates data and trains models, then exits
@@ -142,7 +145,7 @@ services:
     networks:
       - cartsense_net
 
-  # ── Streamlit Frontend ──────────────────────────────────────────────────────
+  # ── React Dashboard ─────────────────────────────────────────────────────────
   streamlit_frontend:
     build:
       context: .
@@ -151,10 +154,14 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+      - /app/node_modules   # keep container's Linux node_modules; don't let host Windows copy shadow it
     environment:
-      BACKEND_URL: http://fastapi_backend:8000
+      FASTAPI_URL: http://fastapi_backend:8000
+      VITE_PROXY_TARGET: http://fastapi_backend:8000
+      PORT: "3000"
     ports:
-      - "8501:8501"
+      - "3000:3000"
+      - "5173:3000"
     depends_on:
       fastapi_backend:
         condition: service_healthy

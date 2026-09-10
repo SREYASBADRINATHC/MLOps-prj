@@ -1,16 +1,9 @@
-FROM python:3.11-slim
-
+FROM node:22-alpine
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir streamlit pandas numpy plotly requests
-
-COPY frontend/ ./frontend/
-
-EXPOSE 8501
-
-CMD ["streamlit", "run", "frontend/app.py", \
-     "--server.address", "0.0.0.0", \
-     "--server.port", "8501", \
-     "--server.headless", "true", \
-     "--browser.gatherUsageStats", "false"]
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY src ./src
+COPY index.html vite.config.ts tsconfig.json server.ts ./
+EXPOSE 3000
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

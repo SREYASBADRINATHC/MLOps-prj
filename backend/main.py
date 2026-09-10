@@ -191,8 +191,12 @@ def health_check() -> HealthCheck:
     """Check health of all system components."""
     db_ok = check_database_health()
     arts = model_manager.artifacts
+    
+    # Meaningful dependency check
+    is_healthy = db_ok and _mlflow_ok and arts.tfidf_loaded
+    
     return HealthCheck(
-        status="healthy" if db_ok else "degraded",
+        status="healthy" if is_healthy else "degraded",
         database=db_ok,
         models_loaded=arts.tfidf_loaded,
         tfidf_loaded=arts.tfidf_loaded,

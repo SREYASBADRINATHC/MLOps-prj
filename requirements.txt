@@ -27,7 +27,7 @@ scikit-learn==1.5.1
 joblib==1.4.2
 
 # Distributed computing (for ALS training)
-pyspark==3.5.2
+pyspark==3.5.1
 
 # MLOps
 mlflow==2.16.2

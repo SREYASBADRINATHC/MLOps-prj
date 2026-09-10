@@ -538,8 +538,9 @@ def generate_interactions(
         scores = np.clip(scores, 0.01, None)
         probs = scores / scores.sum()
 
-        # Number of unique products this user interacts with
-        n_unique = min(random.randint(15, 40), len(candidates))
+        # Target roughly target_per_user interactions total, each product gets ~2 events
+        avg_unique = max(5, target_per_user // 2)
+        n_unique = min(random.randint(max(1, avg_unique - 3), avg_unique + 3), len(candidates))
         chosen_indices = np.random.choice(len(candidates), size=n_unique, replace=False, p=probs)
         chosen_products = [candidates[i] for i in chosen_indices]
 
