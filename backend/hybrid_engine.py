@@ -54,12 +54,18 @@ class RecommendationItem:
     category: str
     brand: str
     price_usd: float
+    image_url: Optional[str]
+    product_url: Optional[str]
+    release_date: Optional[str]
+    is_upcoming: Optional[bool]
     spec_text: str
     als_score: float
     tfidf_score: float
     spec_match_score: float
     final_score: float
     reason: str
+    price_category: Optional[str]
+    newer_than_anchor: Optional[bool]
     attribute_scores: dict = field(default_factory=dict)
 
 
@@ -68,6 +74,8 @@ class RecommendationResult:
     """Full recommendation response."""
     user_id: str
     product_id: str
+    anchor_product_name: str
+    interaction_count: int
     recommendation_mode: str   # cold_start | hybrid | new_user_fallback
     model_version: str
     latency_ms: float
@@ -176,6 +184,11 @@ class HybridRecommendationEngine:
         if anchor_idx is None:
             raise ValueError(f"Product {product_id} not in TF-IDF index.")
 
+        # Extract anchor price and release date for candidate comparison
+        anchor_price = _to_float(anchor.get("price_usd"))
+        anchor_release = _parse_release(anchor.get("release_date"))
+
+
         # ── Get candidates (same category, exclude anchor) ────────────────────
         same_cat_pids = [
             pid for pid in self.product_ids
@@ -271,12 +284,18 @@ class HybridRecommendationEngine:
                     category=str(prod.get("category", "")),
                     brand=str(prod.get("brand", "")),
                     price_usd=float(prod.get("price_usd", 0)),
+                    image_url=_clean_optional_str(prod.get("image_url")),
+                    product_url=_clean_optional_str(prod.get("product_url")),
+                    release_date=_format_release(prod.get("release_date")),
+                    is_upcoming=_to_optional_bool(prod.get("is_upcoming")),
                     spec_text=str(prod.get("spec_text", "")),
                     als_score=breakdown["als"],
                     tfidf_score=breakdown["tfidf"],
                     spec_match_score=breakdown["spec"],
                     final_score=breakdown["final"],
                     reason=reason,
+                    price_category=_price_category(anchor_price, _to_float(prod.get("price_usd"))),
+                    newer_than_anchor=_is_newer_product(anchor_release, _parse_release(prod.get("release_date"))),
                     attribute_scores=spec_attr_scores,
                 )
             )
@@ -305,6 +324,8 @@ class HybridRecommendationEngine:
         return RecommendationResult(
             user_id=user_id,
             product_id=product_id,
+            anchor_product_name=str(anchor.get("name", product_id)),
+            interaction_count=max(interaction_count, 0),
             recommendation_mode=mode,
             model_version=self.model_version,
             latency_ms=latency_ms,
@@ -352,3 +373,68 @@ class HybridRecommendationEngine:
                 parts.append(f"matches required: {', '.join(matched)}")
 
         return "Recommended because: " + "; ".join(parts) if parts else "Specification and behavior similarity match"
+
+
+def _clean_optional_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _to_optional_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def _to_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_release(value: Any):
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime().date()
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        return value
+    try:
+        return pd.to_datetime(value).date()
+    except Exception:
+        return None
+
+
+def _format_release(value: Any) -> Optional[str]:
+    parsed = _parse_release(value)
+    return parsed.isoformat() if parsed else None
+
+
+def _price_category(anchor_price: Optional[float], candidate_price: Optional[float]) -> Optional[str]:
+    if anchor_price is None or candidate_price is None or anchor_price <= 0:
+        return None
+    lower = anchor_price * 0.90
+    upper = anchor_price * 1.10
+    if candidate_price < lower:
+        return "cheaper"
+    if candidate_price > upper:
+        return "premium"
+    return "similar_price"
+
+
+def _is_newer_product(anchor_release, candidate_release) -> Optional[bool]:
+    if anchor_release is None or candidate_release is None:
+        return None
+    return candidate_release > anchor_release

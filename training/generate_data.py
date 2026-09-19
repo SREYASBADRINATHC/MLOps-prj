@@ -340,6 +340,10 @@ def generate_laptops(n: int = 600) -> list[dict]:
             "chipset": None,
             "os": os_name,
             "price_usd": price,
+            "image_url": None,
+            "product_url": None,
+            "release_date": None,
+            "is_upcoming": None,
             "interaction_count": 0,
         }
         row["spec_text"] = _make_laptop_spec_text(row)
@@ -422,6 +426,10 @@ def generate_smartphones(n: int = 400, offset: int = 600) -> list[dict]:
             "chipset": chipset,
             "os": os_name,
             "price_usd": price,
+            "image_url": None,
+            "product_url": None,
+            "release_date": None,
+            "is_upcoming": None,
             "interaction_count": 0,
         }
         row["spec_text"] = _make_phone_spec_text(row)
@@ -625,6 +633,19 @@ def init_schema(eng) -> None:
     )
     from backend.database import Base
     Base.metadata.create_all(bind=eng)
+    from sqlalchemy import inspect
+    inspector = inspect(eng)
+    existing = {col["name"] for col in inspector.get_columns("products")}
+    alter_map = {
+        "image_url": "ALTER TABLE products ADD COLUMN image_url TEXT",
+        "product_url": "ALTER TABLE products ADD COLUMN product_url TEXT",
+        "release_date": "ALTER TABLE products ADD COLUMN release_date DATE",
+        "is_upcoming": "ALTER TABLE products ADD COLUMN is_upcoming BOOLEAN",
+    }
+    with eng.begin() as conn:
+        for col, ddl in alter_map.items():
+            if col not in existing:
+                conn.execute(text(ddl))
     logger.info("Database schema initialized.")
 
 
@@ -642,11 +663,13 @@ def seed_database(products: list[dict], users: list[dict], interactions: list[di
                       (product_id, category, brand, name, description, spec_text,
                        processor, ram_gb, storage_gb, display_type, refresh_rate_hz,
                        gpu, battery_mah, camera_mp, chipset, os, price_usd,
+                       image_url, product_url, release_date, is_upcoming,
                        interaction_count, created_at, updated_at)
                     VALUES
                       (:product_id, :category, :brand, :name, :description, :spec_text,
                        :processor, :ram_gb, :storage_gb, :display_type, :refresh_rate_hz,
                        :gpu, :battery_mah, :camera_mp, :chipset, :os, :price_usd,
+                       :image_url, :product_url, :release_date, :is_upcoming,
                        0, NOW(), NOW())
                 """),
                 row,

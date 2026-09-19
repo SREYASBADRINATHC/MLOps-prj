@@ -9,13 +9,16 @@ import subprocess
 import sys
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
+import os
 
 import mlflow
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from backend.config import settings
@@ -35,8 +38,15 @@ from backend.schemas import (
     RetrainRequest,
     RetrainingStatus,
     TrainingRunSummary,
+    TrainingRunSummary,
     UserProfile,
 )
+from pydantic import BaseModel
+
+class InteractionRequest(BaseModel):
+    user_id: str
+    product_id: str
+    event_type: str = "click"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -50,6 +60,32 @@ _products_cache: pd.DataFrame = pd.DataFrame()
 _hybrid_engine: HybridRecommendationEngine | None = None
 _drift_monitor: DriftMonitor | None = None
 _mlflow_ok: bool = False
+
+
+def _ensure_product_columns(df: pd.DataFrame) -> pd.DataFrame:
+    defaults: dict[str, Any] = {
+        "image_url": None,
+        "product_url": None,
+        "release_date": None,
+        "is_upcoming": None,
+    }
+    for col, value in defaults.items():
+        if col not in df.columns:
+            df[col] = value
+    return df
+
+
+def _to_release_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return pd.to_datetime(value).date()
+    except Exception:
+        return None
 
 
 def _build_hybrid_engine() -> HybridRecommendationEngine | None:
@@ -93,6 +129,7 @@ async def lifespan(app: FastAPI):
     try:
         with engine.begin() as conn:
             _products_cache = pd.read_sql(text("SELECT * FROM products ORDER BY product_id"), conn)
+            _products_cache = _ensure_product_columns(_products_cache)
         logger.info("Products cache loaded: %d records.", len(_products_cache))
     except Exception as exc:
         logger.error("Failed to load products: %s — check database and run generate_data.py", exc)
@@ -210,7 +247,7 @@ def health_check() -> HealthCheck:
 @app.get("/api/products", response_model=list[ProductSummary], tags=["Catalog"])
 def list_products(
     category: str | None = Query(None, description="Filter: laptop | smartphone"),
-    search: str | None = Query(None, description="Search in product name/spec"),
+    search: str | None = Query(None, description="Search in name/brand/product/category/spec"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> list[ProductSummary]:
@@ -223,9 +260,13 @@ def list_products(
     if category:
         df = df[df["category"].str.lower() == category.lower()]
     if search:
+        s = search.strip()
         mask = (
-            df["name"].str.contains(search, case=False, na=False)
-            | df["spec_text"].str.contains(search, case=False, na=False)
+            df["name"].str.contains(s, case=False, na=False)
+            | df["brand"].str.contains(s, case=False, na=False)
+            | df["product_id"].astype(str).str.contains(s, case=False, na=False)
+            | df["category"].str.contains(s, case=False, na=False)
+            | df["spec_text"].str.contains(s, case=False, na=False)
         )
         df = df[mask]
 
@@ -240,6 +281,12 @@ def list_products(
                 brand=str(row["brand"]),
                 name=str(row["name"]),
                 price_usd=float(row["price_usd"]),
+                spec_text=str(row.get("spec_text", "")),
+                image_url=row.get("image_url"),
+                product_url=row.get("product_url"),
+                release_date=_to_release_date(row.get("release_date")),
+                is_upcoming=row.get("is_upcoming"),
+                cold_start=int(row.get("interaction_count", 0)) == 0,
                 ram_gb=row.get("ram_gb"),
                 storage_gb=row.get("storage_gb"),
                 display_type=row.get("display_type"),
@@ -277,6 +324,11 @@ def get_product(product_id: str) -> ProductSpec:
         chipset=row.get("chipset"),
         os=row.get("os"),
         price_usd=float(row["price_usd"]),
+        image_url=row.get("image_url"),
+        product_url=row.get("product_url"),
+        release_date=_to_release_date(row.get("release_date")),
+        is_upcoming=row.get("is_upcoming"),
+        cold_start=int(row.get("interaction_count", 0)) == 0,
         interaction_count=int(row.get("interaction_count", 0)),
     )
 
@@ -324,6 +376,42 @@ def list_users(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
+@app.post("/api/interact", tags=["Users"])
+def log_interaction(req: InteractionRequest):
+    """Log user interaction and update counts."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO interactions (user_id, product_id, event_type, timestamp)
+                    VALUES (:uid, :pid, :event, :ts)
+                """),
+                {
+                    "uid": req.user_id,
+                    "pid": req.product_id,
+                    "event": req.event_type,
+                    "ts": datetime.utcnow().isoformat()
+                }
+            )
+            conn.execute(
+                text("""
+                    UPDATE products 
+                    SET interaction_count = interaction_count + 1 
+                    WHERE product_id = :pid
+                """),
+                {"pid": req.product_id}
+            )
+        # Update the memory cache as well
+        if not _products_cache.empty:
+            idx = _products_cache.index[_products_cache['product_id'] == req.product_id]
+            if not idx.empty:
+                _products_cache.loc[idx, 'interaction_count'] += 1
+                
+        return {"status": "ok"}
+    except Exception as exc:
+        logger.exception("Failed to log interaction: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/api/recommend", response_model=RecommendationResponse, tags=["Recommendations"])
 def recommend(req: RecommendationRequest) -> RecommendationResponse:
@@ -395,12 +483,18 @@ def recommend(req: RecommendationRequest) -> RecommendationResponse:
             category=item.category,
             brand=item.brand,
             price_usd=item.price_usd,
+            image_url=item.image_url,
+            product_url=item.product_url,
+            release_date=_to_release_date(item.release_date),
+            is_upcoming=item.is_upcoming,
             spec_text=item.spec_text,
             als_score=item.als_score,
             tfidf_score=item.tfidf_score,
             spec_match_score=item.spec_match_score,
             final_score=item.final_score,
             reason=item.reason,
+            price_category=item.price_category,
+            newer_than_anchor=item.newer_than_anchor,
             attribute_scores=item.attribute_scores,
         )
         for item in result.recommendations
@@ -410,6 +504,8 @@ def recommend(req: RecommendationRequest) -> RecommendationResponse:
         request_id=request_id,
         user_id=result.user_id,
         product_id=result.product_id,
+        anchor_product_name=result.anchor_product_name,
+        interaction_count=result.interaction_count,
         recommendation_mode=result.recommendation_mode,
         model_version=result.model_version,
         latency_ms=result.latency_ms,
@@ -607,3 +703,16 @@ def get_mlflow_runs(experiment_name: str = "CartSense_Hybrid_Recommendation", li
         return runs[["run_id", "status", "start_time", "metrics.tfidf_rmse", "metrics.als_rmse"]].to_dict(orient="records") if not runs.empty else {"runs": []}
     except Exception as exc:
         return {"error": str(exc), "runs": []}
+
+
+# ── Frontend (SPA) ────────────────────────────────────────────────────────────
+
+if os.path.exists("dist/assets"):
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+
+@app.get("/{full_path:path}", tags=["Frontend"])
+def serve_spa(full_path: str):
+    """Serve the Vite React SPA and static files."""
+    if full_path and os.path.exists(f"dist/{full_path}") and os.path.isfile(f"dist/{full_path}"):
+        return FileResponse(f"dist/{full_path}")
+    return FileResponse("dist/index.html")

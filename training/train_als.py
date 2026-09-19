@@ -134,7 +134,8 @@ def train_als_spark(
     spark = (
         SparkSession.builder.appName("CartSense_ALS")
         .master("local[*]")
-        .config("spark.driver.memory", "4g")
+        .config("spark.driver.memory", "1g")
+        .config("spark.driver.bindAddress", "127.0.0.1")
         .config("spark.sql.shuffle.partitions", "8")
         .config("spark.ui.showConsoleProgress", "false")
         .getOrCreate()

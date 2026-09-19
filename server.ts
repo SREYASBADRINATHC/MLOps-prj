@@ -462,7 +462,7 @@ async function startServer() {
 
   // Additional FastAPI endpoints
   app.get("/api/stats", (req, res) => proxyToFastAPI(req, res, "GET", "/api/stats"));
-  app.get("/api/models/status", (req, res) => proxyToFastAPI(req, res, "GET", "/api/models/status"));
+  app.get("/api/models/status", (req, res) => proxyToFastAPI(req, res, "GET", "/api/model/status"));
   app.post("/api/retrain", (req, res) => proxyToFastAPI(req, res, "POST", "/api/retrain", req.body));
 
   // Initialize Gemini
@@ -675,39 +675,11 @@ Return ONLY raw JSON (no markdown):
       });
     }
 
-    // --- Step 4: Smart fallback — guess category from query and return best guessed product ---
-    const qLower = q.toLowerCase();
-    let fallbackProduct: KnownProduct;
-
-    const laptopBrands = ["hp", "dell", "lenovo", "asus", "acer", "microsoft", "razer", "msi", "samsung book", "macbook", "thinkpad", "surface", "spectre", "omen", "zephyrus", "blade", "predator"];
-    const phoneBrands = ["iphone", "samsung galaxy", "pixel", "oneplus", "xiaomi", "realme", "vivo", "oppo", "motorola", "moto", "sony xperia", "nothing phone", "iqoo", "poco", "redmi", "honor"];
-
-    const isLaptopQuery = laptopBrands.some(b => qLower.includes(b)) || qLower.includes("laptop") || qLower.includes("notebook");
-    const isPhoneQuery = phoneBrands.some(b => qLower.includes(b)) || qLower.includes("phone") || qLower.includes("mobile") || qLower.includes("smartphone");
-
-    if (isPhoneQuery && !isLaptopQuery) {
-      fallbackProduct = PRODUCT_KB.find(p => p.category === "Mobile Phone" && p.brand === "Apple") || PRODUCT_KB[PRODUCT_KB.length - 8];
-    } else {
-      fallbackProduct = PRODUCT_KB.find(p => p.category === "Laptop" && p.brand === "Apple") || PRODUCT_KB[0];
-    }
-
-    // Customize the name to match the query
-    const guessedName = `${q.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} (2026 Edition)`;
-    const recos = generateKBRecommendations(fallbackProduct);
-    recordSearch(q, guessedName, fallbackProduct.category);
-
-    return res.json({
-      success: true,
-      product: {
-        name: guessedName,
-        category: fallbackProduct.category,
-        specs: `Latest 2026 flagship with top specifications. ${fallbackProduct.specs}`,
-        price: fallbackProduct.price,
-        link: `https://www.google.com/search?q=buy+${encodeURIComponent(q)}+price+india`,
-        recos: sanitizeRecommendations(recos)
-      },
-      references: [],
-      source: "smart-fallback"
+    // --- Step 4: No verified result ---
+    return res.status(404).json({
+      success: false,
+      error: "No verified product match found for the query.",
+      source: "no-verified-result"
     });
   });
 
@@ -740,15 +712,9 @@ Return ONLY raw JSON (no markdown):
 
   // ==========================================================================
   // STATIC / HTML ROUTES
+  // (Removed manual / route so Vite can inject HMR and handle index.html)
   // ==========================================================================
-  app.get("/", (req, res) => {
-    res.sendFile(path.resolve(process.cwd(), "index.html"));
-  });
-  app.get("/index.html", (req, res) => {
-    res.sendFile(path.resolve(process.cwd(), "index.html"));
-  });
 
-  // ==========================================================================
   // STATIC / VITE DEV SERVER
   // ==========================================================================
   if (process.env.NODE_ENV !== "production") {

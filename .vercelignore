@@ -1,0 +1,10 @@
+requirements.txt
+backend/
+training/
+artifacts/
+*.db
+*.py
+mlruns/
+mlflow/
+.venv/
+__pycache__/

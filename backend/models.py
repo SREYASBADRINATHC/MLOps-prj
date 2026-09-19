@@ -10,6 +10,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     Index,
@@ -47,6 +48,10 @@ class Product(Base):
     chipset = Column(String(128), nullable=True)
     os = Column(String(64), nullable=True)
     price_usd = Column(Float, nullable=False)
+    image_url = Column(Text, nullable=True)
+    product_url = Column(Text, nullable=True)
+    release_date = Column(Date, nullable=True)
+    is_upcoming = Column(Boolean, nullable=True)
 
     interaction_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=func.now(), nullable=False)

@@ -1,0 +1,11 @@
+{
+  "training_timestamp": "2026-09-19T06:45:30.491293",
+  "model_version": "local-als-2026-09-19",
+  "rank": 4,
+  "n_users": 5,
+  "n_items": 10,
+  "algorithm": "SVD (local dev fallback)",
+  "metrics": {
+    "rmse": 0.45
+  }
+}

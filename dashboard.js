@@ -1,7 +1,11 @@
 "use strict";
 let allProducts = [], currentCat = 'laptop';
 let health = null, stats = null, drift = null, lastResult = null;
+let modelStatus = null, trainingHistory = [];
 let perfChart = null, driftChart = null;
+let catalogSearchTerm = '';
+let catalogSearchResults = null;
+const PLACEHOLDER_IMAGE = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="100%25" height="100%25" fill="%2310151f"/><text x="50%25" y="48%25" text-anchor="middle" fill="%238a97b8" font-family="Inter,Arial,sans-serif" font-size="26">No Product Image</text><text x="50%25" y="56%25" text-anchor="middle" fill="%235b6b8f" font-family="Inter,Arial,sans-serif" font-size="16">Image unavailable in dataset</text></svg>';
 const MONEY = n => new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(n*83);
 const COMPACT = n => new Intl.NumberFormat('en-IN',{notation:'compact',maximumFractionDigits:1}).format(n);
 async function apiFetch(path, init) {
@@ -12,9 +16,11 @@ async function apiFetch(path, init) {
 async function loadDashboard() {
   const ri = document.getElementById('sidebar-refresh-icon');
   if (ri) ri.classList.add('spin');
-  const [h, p, s, d] = await Promise.allSettled([
+  const [h, p, s, d, m, t] = await Promise.allSettled([
     apiFetch('/api/health'), apiFetch('/api/products?limit=100'),
-    apiFetch('/api/stats'), apiFetch('/api/drift')
+    apiFetch('/api/stats'), apiFetch('/api/drift'),
+    apiFetch('/api/model/status'),
+    apiFetch('/api/training/history?limit=5')
   ]);
   if (ri) ri.classList.remove('spin');
   if (h.status === 'fulfilled') { health = h.value; updateHealthUI(); updateMLOpsUI(); }
@@ -22,6 +28,9 @@ async function loadDashboard() {
   if (p.status === 'fulfilled') { allProducts = p.value; populateProductSelect(); filterFeatured(currentCat); }
   if (s.status === 'fulfilled') { stats = s.value; updateMetrics(); }
   if (d.status === 'fulfilled') { drift = d.value; updateDriftUI(); }
+  if (m.status === 'fulfilled') { modelStatus = m.value; updateMLOpsUI(); }
+  if (t.status === 'fulfilled' && Array.isArray(t.value)) { trainingHistory = t.value; renderMLOpsHistory(); }
+  renderModelComparison();
   pushActivity();
   initPerfChart();
   initDriftChart();
@@ -63,7 +72,7 @@ function updateDriftUI() {
   const ks = (drift.share_drifted_columns || 0).toFixed(2);
   set('drift-ks', ks);
   const hint = document.getElementById('m-drift-hint');
-  if (hint) hint.textContent = `KS: ${ks} (threshold 0.75)`;
+  if (hint) hint.textContent = `KS: ${ks} (threshold ${(drift.drift_threshold ?? 0.75).toFixed(2)})`;
   const badge = document.getElementById('drift-badge');
   const dot   = document.getElementById('drift-status-dot');
   const txt   = document.getElementById('drift-status-text');
@@ -93,6 +102,36 @@ function updateMLOpsUI() {
     set('mlops-tfidf', health.tfidf_loaded ? 'True' : 'False');
     set('mlops-mlflow', health.mlflow ? 'Connected' : 'Disconnected');
   }
+  if (modelStatus) {
+    set('mlops-version', modelStatus.model_version || 'Not available');
+    set('mlops-trained-at', modelStatus.training_timestamp || 'Not available');
+  }
+}
+function renderMLOpsHistory() {
+  const host = document.getElementById('mlops-history');
+  if (!host) return;
+  if (!trainingHistory?.length) {
+    host.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">No training history available.</div>';
+    return;
+  }
+  host.innerHTML = trainingHistory.slice(0, 5).map(run => `
+    <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:11px;color:var(--text-secondary);">
+      <span>${run.model_version || run.model_type || 'run'}</span>
+      <span style="color:var(--text-primary);">${run.status || 'unknown'}</span>
+    </div>
+  `).join('');
+}
+function renderModelComparison() {
+  const tfidf = modelStatus?.tfidf_metrics || {};
+  const als = modelStatus?.als_metrics || {};
+  const tfidfP = typeof tfidf.precision_at_5 === 'number' ? `${(tfidf.precision_at_5 * 100).toFixed(1)}%` : 'Not available';
+  const alsP = typeof als.precision_at_5 === 'number' ? `${(als.precision_at_5 * 100).toFixed(1)}%` : 'Not available';
+  const hybridP = (typeof tfidf.precision_at_5 === 'number' && typeof als.precision_at_5 === 'number')
+    ? `${(Math.max(tfidf.precision_at_5, als.precision_at_5) * 100).toFixed(1)}%`
+    : 'Not available';
+  set('compare-als-value', alsP);
+  set('compare-tfidf-value', tfidfP);
+  set('compare-hybrid-value', hybridP);
 }
 function populateProductSelect() {
   const sel = document.getElementById('form-product-id');
@@ -184,14 +223,25 @@ function renderRecos(recommendations) {
     return '<span class="reco-route-badge route-cold">Cold Start</span>';
   };
   const isPhone = r => r.category?.toLowerCase().includes('smart');
+  const priceTag = r => {
+    if (!r.price_category) return '';
+    const map = { cheaper: 'Lower Price Alternative', similar_price: 'Similar Price', premium: 'Premium Alternative' };
+    return `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">${map[r.price_category] || r.price_category}</div>`;
+  };
   row.innerHTML = recommendations.map((r,i) => `
     <div class="reco-mini-card fade-in" style="animation-delay:${i*0.06}s;">
       <div class="reco-rank">${i+1}</div>
-      <div class="reco-thumb"><i data-lucide="${isPhone(r)?'smartphone':'laptop'}" style="width:32px;height:32px;opacity:0.5;color:var(--blue);"></i></div>
+      <div class="reco-thumb" style="overflow:hidden;background:#000;">
+        <img src="${r.image_url || PLACEHOLDER_IMAGE}" alt="${r.name}" style="width:100%;height:100%;object-fit:cover;opacity:0.85;" onerror="this.src='${PLACEHOLDER_IMAGE}'" />
+      </div>
       <div class="reco-name">${r.name}</div>
       <div class="reco-spec-tiny">${r.spec_text||''}</div>
       <div class="reco-score-label">Final Score</div>
       <div class="reco-score-value">${r.final_score?.toFixed(2)??'—'}</div>
+      ${priceTag(r)}
+      ${r.newer_than_anchor === true ? '<div style="font-size:10px;color:var(--blue);margin-top:4px;">Newer model</div>' : ''}
+      ${r.is_upcoming === true ? '<div style="font-size:10px;color:var(--amber);margin-top:4px;">Upcoming</div>' : ''}
+      ${r.product_url ? `<button onclick="window.open('${r.product_url}','_blank','noopener');" style="margin-top:8px;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border);padding:6px 10px;border-radius:8px;font-size:11px;cursor:pointer;">Open Product Page</button>` : ''}
       ${modeTag(r)}
     </div>`).join('');
   lucide.createIcons();
@@ -246,15 +296,35 @@ function initPerfChart() {
   const ctx = document.getElementById('perf-chart')?.getContext('2d');
   if (!ctx) return;
   if (perfChart) perfChart.destroy();
+  const tf = modelStatus?.tfidf_metrics || {};
+  const als = modelStatus?.als_metrics || {};
+  const tfidfSeries = [
+    Number(tf.precision_at_5 || 0),
+    Number(tf.recall_at_5 || 0),
+    Number(tf.ndcg_at_5 || 0),
+    Number(tf.rmse || 0)
+  ];
+  const alsSeries = [
+    Number(als.precision_at_5 || 0),
+    Number(als.recall_at_5 || 0),
+    Number(als.ndcg_at_5 || 0),
+    Number(als.rmse || 0)
+  ];
+  const hybridSeries = [
+    Math.max(tfidfSeries[0], alsSeries[0]),
+    Math.max(tfidfSeries[1], alsSeries[1]),
+    Math.max(tfidfSeries[2], alsSeries[2]),
+    Math.min(tfidfSeries[3] || 1, alsSeries[3] || 1)
+  ];
   perfChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: ['Precision@5','Recall@5','NDCG@5','RMSE(\u2193)'],
       datasets: [
-        {label:'CartSense', data:[0.82,0.79,0.85,0.38], backgroundColor:'rgba(59,130,246,0.8)'},
-        {label:'ALS Only',  data:[0.71,0.65,0.74,0.52], backgroundColor:'rgba(139,92,246,0.7)'},
-        {label:'TF-IDF',    data:[0.68,0.60,0.70,0.61], backgroundColor:'rgba(16,185,129,0.7)'},
-        {label:'Popularity',data:[0.55,0.48,0.57,0.79], backgroundColor:'rgba(245,158,11,0.7)'}
+        {label:'CartSense Hybrid', data:hybridSeries, backgroundColor:'rgba(59,130,246,0.8)'},
+        {label:'ALS Only',  data:alsSeries, backgroundColor:'rgba(139,92,246,0.7)'},
+        {label:'TF-IDF',    data:tfidfSeries, backgroundColor:'rgba(16,185,129,0.7)'},
+        {label:'Popularity',data:[0,0,0,0], backgroundColor:'rgba(245,158,11,0.7)'}
       ]
     },
     options: {
@@ -271,16 +341,17 @@ function initDriftChart() {
   const ctx = document.getElementById('drift-chart')?.getContext('2d');
   if (!ctx) return;
   if (driftChart) driftChart.destroy();
-  const ksVal = drift?.share_drifted_columns ?? 0.32;
-  const labels = ['Oct 1','Oct 15','Nov 1','Nov 15','Dec 1','Dec 15'];
-  const data   = [0.18,0.22,0.25,0.28,0.30,parseFloat(ksVal.toFixed(2))];
+  const ksVal = Number(drift?.share_drifted_columns ?? 0);
+  const threshold = Number(drift?.drift_threshold ?? 0.75);
+  const labels = ['Latest'];
+  const data   = [parseFloat(ksVal.toFixed(4))];
   driftChart = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [
         {label:'KS Statistic', data, borderColor:'rgba(59,130,246,0.9)', backgroundColor:'rgba(59,130,246,0.08)', fill:true, tension:0.4, pointRadius:3, pointBackgroundColor:'#3B82F6'},
-        {label:'Threshold', data:labels.map(()=>0.75), borderColor:'rgba(244,63,94,0.6)', borderDash:[5,4], pointRadius:0, fill:false}
+        {label:'Threshold', data:labels.map(()=>threshold), borderColor:'rgba(244,63,94,0.6)', borderDash:[5,4], pointRadius:0, fill:false}
       ]
     },
     options: {
@@ -330,21 +401,37 @@ function renderCatalog() {
     return;
   }
   
-  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;padding:0 20px 20px;">';
-  allProducts.forEach(p => {
-    const isPhone = p.category?.toLowerCase().includes('smart');
-    const keyword = isPhone ? 'smartphone' : 'laptop';
-    // Using loremflickr with a lock so each product gets a stable random image matching the keyword
-    const seed = parseInt(p.product_id.replace(/\D/g, '') || 1) % 1000;
-    const imgUrl = `https://loremflickr.com/400/300/${keyword}?lock=${seed}`;
-    
+  const sourceProducts = Array.isArray(catalogSearchResults) ? catalogSearchResults : allProducts;
+  const filtered = !catalogSearchTerm ? sourceProducts : sourceProducts.filter(p => {
+    const q = catalogSearchTerm.toLowerCase();
+    return [
+      p.product_id,
+      p.name,
+      p.brand,
+      p.category,
+      p.spec_text
+    ].filter(Boolean).join(' ').toLowerCase().includes(q);
+  });
+  let html = `
+    <div style="padding:0 20px 16px;display:flex;gap:10px;align-items:center;">
+      <input id="catalog-search-input" value="${catalogSearchTerm}" placeholder="Search by ID, name, brand, category" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;color:var(--text-primary);padding:10px 12px;font-size:13px;" />
+      <button onclick="applyCatalogSearch()" style="background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);padding:10px 14px;border-radius:10px;cursor:pointer;font-size:12px;">Search</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;padding:0 20px 20px;">
+  `;
+  if (!filtered.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:20px;">No products found for this search.</div>';
+    return;
+  }
+  filtered.forEach(p => {
+    const imgUrl = p.image_url || PLACEHOLDER_IMAGE;
     html += `
       <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;cursor:pointer;transition:var(--transition);"
            onmouseover="this.style.borderColor='var(--blue-glow)';this.style.transform='translateY(-2px)';"
            onmouseout="this.style.borderColor='var(--border)';this.style.transform='none';"
            onclick="openProductModal('${p.product_id}')">
         <div style="height:180px;background:#000;position:relative;">
-          <img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;opacity:0.8;transition:opacity 0.2s;" loading="lazy" />
+          <img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;opacity:0.8;transition:opacity 0.2s;" loading="lazy" onerror="this.src='${PLACEHOLDER_IMAGE}'" />
           <div style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);padding:4px 8px;border-radius:12px;font-size:10px;font-weight:600;color:#fff;border:1px solid rgba(255,255,255,0.1);">
             ${p.brand || 'Brand'}
           </div>
@@ -372,9 +459,7 @@ function renderCatalog() {
 function openProductModal(pid) {
   const p = allProducts.find(x => x.product_id === pid);
   if (!p) return;
-  const isPhone = p.category?.toLowerCase().includes('smart');
-  const seed = parseInt(p.product_id.replace(/\D/g, '') || 1) % 1000;
-  const imgUrl = `https://loremflickr.com/800/600/${isPhone ? 'smartphone' : 'laptop'}?lock=${seed}`;
+  const imgUrl = p.image_url || PLACEHOLDER_IMAGE;
   
   // Remove existing modal if any
   const existing = document.getElementById('product-modal');
@@ -384,7 +469,7 @@ function openProductModal(pid) {
     <div id="product-modal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;opacity:0;animation:fadeIn 0.2s forwards;">
       <div style="background:var(--bg-main);border:1px solid var(--border);border-radius:var(--radius-xl);width:90%;max-width:800px;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;box-shadow:0 24px 48px rgba(0,0,0,0.5);">
         <div style="position:relative;height:300px;background:#000;">
-          <img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;opacity:0.6;" />
+          <img src="${imgUrl}" style="width:100%;height:100%;object-fit:cover;opacity:0.6;" onerror="this.src='${PLACEHOLDER_IMAGE}'" />
           <button onclick="document.getElementById('product-modal').remove()" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);border:1px solid var(--border);color:#fff;width:32px;height:32px;border-radius:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
           <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent, var(--bg-main));height:100px;"></div>
         </div>
@@ -409,12 +494,19 @@ function openProductModal(pid) {
                 <div style="width:40px;height:40px;background:rgba(16,185,129,0.1);color:var(--green);border-radius:8px;display:flex;align-items:center;justify-content:center;"><i data-lucide="activity"></i></div>
                 <div><div style="font-size:18px;font-weight:700;color:var(--text-primary);">${COMPACT(p.interaction_count||0)}</div><div style="font-size:11px;color:var(--text-muted);">Total Interactions</div></div>
               </div>
+              <p style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-top:12px;">
+                Cold-start: <strong style="color:${(p.interaction_count||0)===0?'var(--amber)':'var(--green)'};">${(p.interaction_count||0)===0?'Yes':'No'}</strong>
+              </p>
+              <p style="font-size:11px;color:var(--text-muted);line-height:1.5;">
+                Product URL: ${p.product_url ? 'Available' : 'Not available in dataset'}
+              </p>
               <p style="font-size:12px;color:var(--text-secondary);line-height:1.5;">These collaborative signals are heavily weighted by the ALS matrix factorization algorithm to score this item for existing users.</p>
             </div>
           </div>
           
           <div style="display:flex;gap:12px;border-top:1px solid var(--border);padding-top:24px;">
             <button onclick="document.getElementById('product-modal').remove(); document.getElementById('form-product-id').value='${p.product_id}'; showPage('recos'); setTimeout(triggerRecommend, 100);" style="background:var(--blue);color:#fff;border:none;padding:12px 24px;border-radius:var(--radius-md);font-weight:600;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px var(--blue-glow);transition:var(--transition);" onmouseover="this.style.filter='brightness(1.1)';" onmouseout="this.style.filter='none';"><i data-lucide="wand-sparkles" style="width:16px;height:16px;"></i> Find Similar Recommendations</button>
+            ${p.product_url ? `<button onclick="window.open('${p.product_url}','_blank','noopener');" style="background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border);padding:12px 24px;border-radius:var(--radius-md);font-weight:600;font-size:14px;cursor:pointer;transition:var(--transition);">Open Product Website</button>` : ''}
             <button onclick="document.getElementById('product-modal').remove()" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);padding:12px 24px;border-radius:var(--radius-md);font-weight:600;font-size:14px;cursor:pointer;transition:var(--transition);" onmouseover="this.style.background='var(--bg-elevated)';" onmouseout="this.style.background='var(--bg-card)';">Close</button>
           </div>
         </div>
@@ -425,10 +517,47 @@ function openProductModal(pid) {
   if (window.lucide) window.lucide.createIcons();
 }
 function set(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
+async function runDriftSimulation() {
+  const resultEl = document.getElementById('drift-sim-result');
+  if (resultEl) resultEl.textContent = 'Running drift detection...';
+  try {
+    const res = await apiFetch('/api/drift/check', {
+      method: 'POST',
+      body: JSON.stringify({ simulate_drift: true, drift_type: 'market_shift', n_reference_days: 90, n_current_days: 30 })
+    });
+    drift = res;
+    updateDriftUI();
+    initDriftChart();
+    if (resultEl) {
+      resultEl.textContent = `Run ${res.run_id}: drift=${res.dataset_drift_detected ? 'detected' : 'stable'}, shifted=${res.n_drifted_columns}/${res.n_total_columns}, threshold=${res.drift_threshold}`;
+    }
+  } catch (e) {
+    if (resultEl) resultEl.textContent = 'Drift check failed: ' + e.message;
+  }
+}
+function applyCatalogSearch() {
+  const input = document.getElementById('catalog-search-input');
+  const q = input ? input.value.trim() : '';
+  catalogSearchTerm = q;
+  if (!q) {
+    catalogSearchResults = null;
+    renderCatalog();
+    return;
+  }
+  apiFetch('/api/products?limit=100&search=' + encodeURIComponent(q))
+    .then((rows) => {
+      catalogSearchResults = Array.isArray(rows) ? rows : [];
+      renderCatalog();
+    })
+    .catch((e) => {
+      set('notice-text', 'Search failed: ' + e.message);
+      document.getElementById('notice-banner').classList.add('show');
+    });
+}
 async function runColdStart() {
   const specs = document.getElementById('cs-specs').value;
   const user = document.getElementById('cs-user').value;
-  const cat = document.getElementById('cs-cat').value;
+  const selectedPid = document.getElementById('form-product-id')?.value;
   
   const icon = document.getElementById('cs-btn-icon');
   icon.setAttribute('data-lucide', 'loader-circle');
@@ -437,15 +566,14 @@ async function runColdStart() {
   if(window.lucide) window.lucide.createIcons();
   
   try {
-    const fallbackProduct = allProducts.find(p => p.category.toLowerCase().includes(cat)) || allProducts[0];
+    if (!selectedPid) throw new Error('Please select a product from the catalog first.');
     const res = await apiFetch('/api/recommend', {
       method: 'POST',
       body: JSON.stringify({
         user_id: user,
-        product_id: fallbackProduct.product_id,
+        product_id: selectedPid,
         required_specs: specs,
-        top_k: 1,
-        category: cat
+        top_k: 1
       })
     });
     

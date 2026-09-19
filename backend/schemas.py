@@ -6,7 +6,7 @@ No malformed input reaches model or database code.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -93,6 +93,11 @@ class ProductSpec(BaseModel):
     chipset: Optional[str]
     os: Optional[str]
     price_usd: float
+    image_url: Optional[str] = None
+    product_url: Optional[str] = None
+    release_date: Optional[date] = None
+    is_upcoming: Optional[bool] = None
+    cold_start: bool = False
     interaction_count: int
 
 
@@ -103,6 +108,12 @@ class ProductSummary(BaseModel):
     brand: str
     name: str
     price_usd: float
+    spec_text: Optional[str] = None
+    image_url: Optional[str] = None
+    product_url: Optional[str] = None
+    release_date: Optional[date] = None
+    is_upcoming: Optional[bool] = None
+    cold_start: bool = False
     ram_gb: Optional[float]
     storage_gb: Optional[float]
     display_type: Optional[str]
@@ -125,12 +136,18 @@ class RecommendationItemResponse(BaseModel):
     category: str
     brand: str
     price_usd: float
+    image_url: Optional[str] = None
+    product_url: Optional[str] = None
+    release_date: Optional[date] = None
+    is_upcoming: Optional[bool] = None
     spec_text: str
     als_score: float = Field(description="Normalized ALS collaborative score [0-1]")
     tfidf_score: float = Field(description="Normalized TF-IDF cosine similarity [0-1]")
     spec_match_score: float = Field(description="Specification match score [0-1]")
     final_score: float = Field(description="Blended final hybrid score [0-1]")
     reason: str
+    price_category: Optional[str] = None
+    newer_than_anchor: Optional[bool] = None
     attribute_scores: dict[str, float] = Field(default_factory=dict)
 
 
@@ -140,6 +157,8 @@ class RecommendationResponse(BaseModel):
     user_id: str
     product_id: str
     recommendation_mode: str = Field(description="cold_start | hybrid | new_user_fallback")
+    anchor_product_name: Optional[str] = None
+    interaction_count: Optional[int] = None
     model_version: str
     latency_ms: float
     als_used: bool
